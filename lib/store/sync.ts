@@ -22,6 +22,8 @@ export interface SyncResult {
   offline: boolean;
 }
 
+const SYNC_BATCH_SIZE = 500;
+
 const toPayload = (expense: LocalExpense) => ({
   clientId: expense.id,
   tileId: expense.tileId,
@@ -37,6 +39,42 @@ const toPayload = (expense: LocalExpense) => ({
   deletedAt: expense.deletedAt,
 });
 
+const flushBatch = async (batch: LocalExpense[]): Promise<SyncResult> => {
+  try {
+    const result = await api.post<{ synced: string[]; failed: string[] }>(
+      "/expenses/sync",
+      { expenses: batch.map(toPayload) }
+    );
+    return {
+      synced: result.synced ?? [],
+      failed: result.failed ?? [],
+      offline: false,
+    };
+  } catch (error) {
+    const itemError =
+      error instanceof ApiError && [400, 409, 413, 422].includes(error.status);
+
+    if (!itemError) return { synced: [], failed: [], offline: true };
+    if (batch.length === 1) {
+      return { synced: [], failed: [batch[0].id], offline: false };
+    }
+
+    // Validation reports reject a request as a whole. Split it until the one
+    // malformed legacy row is isolated, allowing every valid neighbour to
+    // sync instead of discarding an entire offline queue with it.
+    const middle = Math.ceil(batch.length / 2);
+    const first = await flushBatch(batch.slice(0, middle));
+    if (first.offline) return first;
+    const second = await flushBatch(batch.slice(middle));
+
+    return {
+      synced: [...first.synced, ...second.synced],
+      failed: [...first.failed, ...second.failed],
+      offline: second.offline,
+    };
+  }
+};
+
 /**
  * Pushes pending expenses in one batch. Returns which ids the server accepted
  * so the caller can clear their `pendingSync` flag.
@@ -44,21 +82,18 @@ const toPayload = (expense: LocalExpense) => ({
 export const flushExpenses = async (pending: LocalExpense[]): Promise<SyncResult> => {
   if (!pending.length) return { synced: [], failed: [], offline: false };
 
-  try {
-    const result = await api.post<{ synced: string[]; failed: string[] }>(
-      "/expenses/sync",
-      { expenses: pending.map(toPayload) }
-    );
-    return { synced: result.synced ?? [], failed: result.failed ?? [], offline: false };
-  } catch (error) {
-    // 4xx means the server rejected the payload — retrying unchanged won't
-    // help, so those ids are reported failed and stop blocking the queue.
-    // Anything else (network down, 5xx) leaves them pending for the next pass.
-    if (error instanceof ApiError && error.status >= 400 && error.status < 500 && !error.isAuthError) {
-      return { synced: [], failed: pending.map((e) => e.id), offline: false };
-    }
-    return { synced: [], failed: [], offline: true };
+  const synced: string[] = [];
+  const failed: string[] = [];
+
+  for (let index = 0; index < pending.length; index += SYNC_BATCH_SIZE) {
+    const batch = pending.slice(index, index + SYNC_BATCH_SIZE);
+    const result = await flushBatch(batch);
+    synced.push(...result.synced);
+    failed.push(...result.failed);
+    if (result.offline) return { synced, failed, offline: true };
   }
+
+  return { synced, failed, offline: false };
 };
 
 /** True when the browser believes it has a connection. */

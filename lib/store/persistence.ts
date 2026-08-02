@@ -22,6 +22,7 @@ import type { TallyState } from "./state";
  */
 
 const KEY_PREFIX = "tally.state";
+const FULL_RESYNC_VERSION = 1;
 
 /**
  * Bump this whenever the shape or the starting data changes in a way that a
@@ -41,6 +42,25 @@ const SCHEMA_VERSION = 3;
  */
 const storageKey = (userId: string | null) =>
   userId ? `${KEY_PREFIX}.v${SCHEMA_VERSION}.${userId}` : `${KEY_PREFIX}.v${SCHEMA_VERSION}.anon`;
+
+const fullResyncKey = (userId: string) => `${KEY_PREFIX}.full-resync.${userId}`;
+
+/**
+ * The production frontend previously called an expense endpoint that did not
+ * exist. Its 404 was incorrectly treated as a permanent item rejection, so
+ * those local rows lost their pending flag without ever reaching MongoDB.
+ * Replay every account once after the endpoint ships; clientId makes it safe
+ * for rows that did get through in another environment.
+ */
+export const needsFullResync = (userId: string | null): boolean => {
+  if (typeof window === "undefined" || !userId) return false;
+  return window.localStorage.getItem(fullResyncKey(userId)) !== String(FULL_RESYNC_VERSION);
+};
+
+export const markFullResyncComplete = (userId: string | null): void => {
+  if (typeof window === "undefined" || !userId) return;
+  window.localStorage.setItem(fullResyncKey(userId), String(FULL_RESYNC_VERSION));
+};
 
 interface Envelope {
   version: number;

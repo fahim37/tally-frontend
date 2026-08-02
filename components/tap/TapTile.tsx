@@ -167,7 +167,7 @@ export function TapTile({
       }}
     >
       <span className="w-full">
-        <TileArt iconKey={tile.iconKey} size={42} className="mx-auto -mt-0.5" />
+        <TileArt iconKey={tile.iconKey} size={46} className="mx-auto -mt-0.5" />
 
         {/* Two compact rows keep a busy day legible instead of fading the
             marks out at the tile edge. The fixed-height area also keeps every

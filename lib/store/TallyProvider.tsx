@@ -11,7 +11,14 @@ import {
 } from "react";
 import { reducer, type TallyAction } from "./reducer";
 import { createInitialState, type TallyState } from "./state";
-import { loadState, saveState, clearState, flushState } from "./persistence";
+import {
+  clearState,
+  flushState,
+  loadState,
+  markFullResyncComplete,
+  needsFullResync,
+  saveState,
+} from "./persistence";
 import { flushExpenses, isOnline } from "./sync";
 import { fetchSession, hasSession, signOut as revokeSession } from "../auth";
 
@@ -102,6 +109,23 @@ export function TallyProvider({ children }: { children: React.ReactNode }) {
     saveState(state);
   }, [state, hydrated]);
 
+  // One-time repair for production builds that cleared pending flags after the
+  // not-yet-mounted sync route returned 404. Replaying is idempotent by local
+  // expense id, so this also remains safe for rows synced elsewhere already.
+  useEffect(() => {
+    const userId = state.profile.userId;
+    if (!hydrated || !needsFullResync(userId)) return;
+
+    if (state.expenses.length === 0) {
+      markFullResyncComplete(userId);
+      return;
+    }
+
+    dispatch({ type: "QUEUE_ALL_EXPENSES" });
+    // This is a per-account migration, not a response to expense mutations.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, state.profile.userId]);
+
   // A deferred write means the newest taps live only in memory for up to a
   // second. These are the last events a mobile browser reliably delivers
   // before it may discard the tab.
@@ -151,9 +175,11 @@ export function TallyProvider({ children }: { children: React.ReactNode }) {
   // render body is not safe under concurrent rendering, where a render can be
   // thrown away before it ever commits.
   const pendingRef = useRef(pending);
+  const userIdRef = useRef(state.profile.userId);
   useEffect(() => {
     pendingRef.current = pending;
-  }, [pending]);
+    userIdRef.current = state.profile.userId;
+  }, [pending, state.profile.userId]);
 
   const syncNow = useCallback(async () => {
     const queue = pendingRef.current;
@@ -166,6 +192,9 @@ export function TallyProvider({ children }: { children: React.ReactNode }) {
       const result = await flushExpenses(queue);
       const settled = [...result.synced, ...result.failed];
       if (settled.length) dispatch({ type: "MARK_SYNCED", expenseIds: settled });
+      if (!result.offline && settled.length === queue.length) {
+        markFullResyncComplete(userIdRef.current);
+      }
     } finally {
       syncing.current = false;
     }

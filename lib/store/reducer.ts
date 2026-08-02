@@ -52,6 +52,7 @@ export type TallyAction =
   | { type: "UPDATE_PROFILE"; patch: Partial<TallyState["profile"]> }
   | { type: "UPDATE_SETTINGS"; patch: Partial<TallyState["settings"]> }
   | { type: "SET_ONLINE"; online: boolean }
+  | { type: "QUEUE_ALL_EXPENSES" }
   | { type: "MARK_SYNCED"; expenseIds: string[] }
   | { type: "SIGN_IN"; user: AuthUser }
   | { type: "SIGN_OUT" }
@@ -548,6 +549,12 @@ export const reducer = (state: TallyState, action: TallyAction): TallyState => {
 
     case "SET_ONLINE":
       return { ...state, online: action.online };
+
+    case "QUEUE_ALL_EXPENSES":
+      return {
+        ...state,
+        expenses: state.expenses.map((expense) => ({ ...expense, pendingSync: true })),
+      };
 
     case "MARK_SYNCED": {
       const ids = new Set(action.expenseIds);
