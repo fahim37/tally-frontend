@@ -74,7 +74,7 @@ export function SwipeRow({ children, onEdit, onDelete, label }: SwipeRowProps) {
   const isOpen = offset < -OPEN_THRESHOLD / 2;
 
   return (
-    <div className="relative overflow-hidden rounded-[13px]" style={{ background: "var(--bg)" }}>
+    <div className="relative overflow-hidden rounded-card" style={{ background: "var(--bg)" }}>
       {/* Marked so the layout audit knows these sit under the row by design
           until it's swiped open — they are not "covered" controls. */}
       <div data-swipe-actions className="absolute inset-y-0 right-0 flex">
@@ -91,7 +91,7 @@ export function SwipeRow({ children, onEdit, onDelete, label }: SwipeRowProps) {
           style={{ background: "var(--sky)", color: "var(--blue)" }}
         >
           <Icon name="edit" size={17} strokeWidth={1.8} />
-          <span className="text-[10px] font-medium">Edit</span>
+          <span className="text-caption font-medium">Edit</span>
         </button>
 
         <button
@@ -107,7 +107,7 @@ export function SwipeRow({ children, onEdit, onDelete, label }: SwipeRowProps) {
           style={{ background: "var(--amber)", color: "#0B1220" }}
         >
           <Icon name="trash" size={17} strokeWidth={1.8} />
-          <span className="text-[10px] font-medium">Delete</span>
+          <span className="text-caption font-medium">Delete</span>
         </button>
       </div>
 

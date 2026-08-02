@@ -54,6 +54,11 @@ export const viewport: Viewport = {
   // so this caps rather than disables it.
   maximumScale: 5,
   viewportFit: "cover",
+  // Makes the soft keyboard shrink the visual viewport instead of drawing over
+  // it, which is what lets useKeyboardInset() measure it at all. Without this,
+  // Android Chrome reports an unchanged viewport and the bottom nav stays
+  // sitting on top of the keys.
+  interactiveWidget: "resizes-content",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f4f5f7" },
     { media: "(prefers-color-scheme: dark)", color: "#0b1220" },
@@ -69,6 +74,10 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
+      // Next 16 no longer overrides scroll-behavior during navigation. Without
+      // this the router stops scrolling to the top on a route change, so a
+      // deep-scrolled History followed by a tap on Profile lands mid-page.
+      data-scroll-behavior="smooth"
       className={`${bricolage.variable} ${geist.variable} ${geistMono.variable}`}
     >
       <body>

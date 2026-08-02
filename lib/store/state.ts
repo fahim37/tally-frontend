@@ -1,6 +1,5 @@
 import type { IconKey } from "../types";
 import type { LocalDate, LocalMonth } from "../date";
-import { currentLocalMonth, lastNLocalDates, todayLocalDate, toLocalMonth, fromLocalDate } from "../date";
 
 /**
  * The client-side state shape.
@@ -21,13 +20,29 @@ export interface LocalCategory {
   sortIndex: number;
 }
 
+/**
+ * How a tile behaves when it's tapped.
+ *
+ * Some things cost the same every single time — a cigarette, a bus fare — and
+ * for those the whole point of the app is that one tap is the entire
+ * interaction. Others ("food", "extras") are a category of spending whose
+ * amount is different every time, and logging those at a fixed price would
+ * just be recording a number nobody believes.
+ *
+ * So a tile declares which it is, and the pad does the right thing.
+ */
+export type TileEntry = "instant" | "prompt";
+
 export interface LocalTile {
   id: string;
   name: string;
   iconKey: IconKey;
   categorySlug: string;
+  /** For an "instant" tile this is what a tap logs. For a "prompt" tile it's
+   *  only the amount the keypad opens pre-filled with. */
   defaultAmountMinor: number;
   presetAmountsMinor: number[];
+  entry: TileEntry;
   usageCount: number;
   lastUsedAt: string | null;
   sortIndex: number;
@@ -97,11 +112,13 @@ export interface LocalRecurring {
 }
 
 export interface LocalProfile {
+  /** The API's user id. Null until authenticated; also the key the persisted
+   *  store is namespaced under, so two accounts on one device stay separate. */
+  userId: string | null;
   email: string;
   displayName: string;
   currency: string;
   appearance: "light" | "dark" | "system";
-  /** False until sign-in. Local-only until the auth endpoints are wired. */
   signedIn: boolean;
   authProvider: "email" | "google" | null;
   onboardingCompleted: boolean;
@@ -134,7 +151,10 @@ export interface TallyState {
   hydrated: boolean;
 }
 
-// ── Seed ───────────────────────────────────────────────────────────────────
+// ── Starting set ───────────────────────────────────────────────────────────
+// The categories and their keyword tables, plus the tiles onboarding offers.
+// Neither is user data: the keywords classify typed text without an AI call,
+// and the tiles are a menu, not a history.
 
 export const CATEGORIES: LocalCategory[] = [
   {
@@ -225,21 +245,77 @@ export const CATEGORIES: LocalCategory[] = [
   },
 ];
 
+/**
+ * The tiles a new account starts with.
+ *
+ * Four, not a screenful. One is a fixed-price thing you buy repeatedly, and
+ * the other three are the broad buckets almost all day-to-day spending falls
+ * into — because a tile you have to think about is a tile you won't tap.
+ * Anything more specific is better added by the person who actually buys it.
+ *
+ * The split that matters is `entry`: Cigarette costs the same every time, so a
+ * tap logs it and the interaction is over. Food, transport and extras vary
+ * every time, so a tap asks how much — with the amounts you actually reach for
+ * one press away.
+ */
+const STARTER_TILES: {
+  id: string;
+  name: string;
+  iconKey: IconKey;
+  categorySlug: string;
+  amt: number;
+  entry: TileEntry;
+  presets: number[];
+}[] = [
+  {
+    id: "tile-cig",
+    name: "Cigarette",
+    iconKey: "cig",
+    categorySlug: "cigarettes",
+    amt: 1600,
+    entry: "instant",
+    // Still offered on long-press, for when the price changes or a whole pack
+    // gets bought at once.
+    presets: [1600, 3200, 8000, 16000],
+  },
+  {
+    id: "tile-food",
+    name: "Food",
+    iconKey: "lunch",
+    categorySlug: "food-drink",
+    amt: 5000,
+    entry: "prompt",
+    presets: [2000, 5000, 10000, 15000, 25000, 40000],
+  },
+  {
+    id: "tile-transport",
+    name: "Transport",
+    iconKey: "rick",
+    categorySlug: "transport",
+    amt: 5000,
+    entry: "prompt",
+    presets: [2000, 3000, 5000, 8000, 12000, 20000],
+  },
+  {
+    id: "tile-extras",
+    name: "Extras",
+    iconKey: "bag",
+    categorySlug: "other",
+    amt: 10000,
+    entry: "prompt",
+    presets: [5000, 10000, 20000, 50000, 100000, 200000],
+  },
+];
+
 const seedTiles = (): LocalTile[] =>
-  [
-    { id: "tile-tea", name: "Tea", iconKey: "tea" as IconKey, categorySlug: "food-drink", amt: 2000 },
-    { id: "tile-cig", name: "Cigarette", iconKey: "cig" as IconKey, categorySlug: "cigarettes", amt: 1600 },
-    { id: "tile-rick", name: "Rickshaw", iconKey: "rick" as IconKey, categorySlug: "transport", amt: 5000 },
-    { id: "tile-lunch", name: "Lunch", iconKey: "lunch" as IconKey, categorySlug: "food-drink", amt: 15000 },
-    { id: "tile-data", name: "Data pack", iconKey: "data" as IconKey, categorySlug: "bills-data", amt: 30000 },
-    { id: "tile-coffee", name: "Coffee", iconKey: "coffee" as IconKey, categorySlug: "food-drink", amt: 25000 },
-  ].map((t, i) => ({
+  STARTER_TILES.map((t, i) => ({
     id: t.id,
     name: t.name,
     iconKey: t.iconKey,
     categorySlug: t.categorySlug,
     defaultAmountMinor: t.amt,
-    presetAmountsMinor: [t.amt, t.amt * 2, t.amt * 5, t.amt * 10],
+    presetAmountsMinor: t.presets,
+    entry: t.entry,
     usageCount: 0,
     lastUsedAt: null,
     sortIndex: i,
@@ -248,181 +324,38 @@ const seedTiles = (): LocalTile[] =>
   }));
 
 /**
- * 30 days of plausible history so the Dashboard, Habits and History screens
- * have something real to show on first run. Today is left empty — the first
- * tap the user makes is the first mark of the day, which is the point.
+ * A brand-new account.
+ *
+ * Everything derived from behaviour starts empty — no expenses, no habits, no
+ * goals, no budget, no recurring rules. The app used to fabricate 30 days of
+ * history here so the charts had something to draw, which made every screen
+ * look convincing and every number a lie. A first-run user now sees real
+ * emptiness and the action that fills it.
+ *
+ * The tiles and categories are NOT data in that sense: they are the menu
+ * onboarding step 2 offers ("What do you buy most days?"), and anything the
+ * user doesn't pick is archived there. They start at zero usage.
  */
-const seedExpenses = (tiles: LocalTile[]): LocalExpense[] => {
-  const byId = new Map(tiles.map((t) => [t.id, t]));
-  const dates = lastNLocalDates(30);
-  const today = todayLocalDate();
-  const rows: LocalExpense[] = [];
-
-  dates.forEach((localDate, dayIndex) => {
-    if (localDate === today) return;
-
-    const weekday = fromLocalDate(localDate).getDay();
-    const isWeekend = weekday === 5 || weekday === 6;
-
-    const plan: [string, number][] = [
-      ["tile-tea", 3 + (dayIndex % 4)],
-      ["tile-cig", isWeekend ? 13 : 7 + (dayIndex % 5)],
-      ["tile-rick", isWeekend ? 4 : 2],
-      ["tile-lunch", 1],
-      ["tile-coffee", isWeekend ? 1 : 0],
-      ["tile-data", dayIndex === 16 ? 1 : 0],
-    ];
-
-    for (const [tileId, quantity] of plan) {
-      if (!quantity) continue;
-      const tile = byId.get(tileId);
-      if (!tile) continue;
-
-      const occurredAt = new Date(`${localDate}T12:30:00`).toISOString();
-      rows.push({
-        id: `seed-${localDate}-${tileId}`,
-        tileId: tile.id,
-        categorySlug: tile.categorySlug,
-        name: tile.name,
-        unitAmountMinor: tile.defaultAmountMinor,
-        quantity,
-        totalAmountMinor: tile.defaultAmountMinor * quantity,
-        occurredAt,
-        localDate,
-        localMonth: toLocalMonth(fromLocalDate(localDate)),
-        source: "tap",
-        pendingSync: false,
-        deletedAt: null,
-      });
-    }
-  });
-
-  return rows;
-};
-
-/** "YYYY-MM-DD" for `day` of next month — where a monthly rule next falls due. */
-const nextMonthOn = (day: number): string => {
-  const now = new Date();
-  const next = new Date(now.getFullYear(), now.getMonth() + 1, day);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}`;
-};
-
-export const createInitialState = (): TallyState => {
-  const tiles = seedTiles();
-  const expenses = seedExpenses(tiles);
-
-  // Reflect the seeded history in the usage counts so the pad's
-  // frequency ordering is meaningful from the start.
-  const usage = new Map<string, number>();
-  for (const e of expenses) {
-    if (e.tileId) usage.set(e.tileId, (usage.get(e.tileId) ?? 0) + e.quantity);
-  }
-
-  return {
-    profile: {
-      email: "",
-      displayName: "",
-      currency: "BDT",
-      appearance: "system",
-      signedIn: false,
-      authProvider: null,
-      onboardingCompleted: false,
-      totalTaps: expenses.reduce((sum, e) => sum + e.quantity, 0),
-    },
-    settings: { strikeAt: 5, longPressMs: 430, pressDepth: 3 },
-    categories: CATEGORIES,
-    tiles: tiles.map((t) => ({ ...t, usageCount: usage.get(t.id) ?? 0 })),
-    expenses,
-    budgets: [
-      {
-        month: currentLocalMonth(),
-        overallLimitMinor: 1_800_000, // ৳18,000
-        categoryLimits: [
-          { categorySlug: "food-drink", limitMinor: 500_000 },
-          { categorySlug: "cigarettes", limitMinor: 400_000 },
-          { categorySlug: "transport", limitMinor: 250_000 },
-          { categorySlug: "bills-data", limitMinor: 200_000 },
-        ],
-      },
-    ],
-    habits: [
-      {
-        id: "habit-cig",
-        tileId: "tile-cig",
-        name: "Cigarettes",
-        iconKey: "cig",
-        unitAmountMinor: 1600,
-        baselineDailyCount: 12,
-        targetDailyCount: 8,
-        whatIfDailyCount: 8,
-        sortIndex: 0,
-      },
-      {
-        id: "habit-tea",
-        tileId: "tile-tea",
-        name: "Tea",
-        iconKey: "tea",
-        unitAmountMinor: 2000,
-        baselineDailyCount: 6,
-        targetDailyCount: null,
-        whatIfDailyCount: 4,
-        sortIndex: 1,
-      },
-      {
-        id: "habit-rick",
-        tileId: "tile-rick",
-        name: "Rickshaw",
-        iconKey: "rick",
-        unitAmountMinor: 5000,
-        baselineDailyCount: 2,
-        targetDailyCount: null,
-        whatIfDailyCount: 1,
-        sortIndex: 2,
-      },
-    ],
-    goals: [
-      {
-        id: "goal-phone",
-        title: "A new phone by March",
-        note: "Four fewer a day puts the difference aside.",
-        targetAmountMinor: 4_200_000,
-        savedAmountMinor: 729_600,
-        linkedHabitId: "habit-cig",
-        reductionPerDay: 4,
-        targetDate: null,
-      },
-    ],
-    // Seeded as already run for the current month, so opening the app for the
-    // first time doesn't immediately auto-log a month's rent into *today* and
-    // send the daily ring to 2000%.
-    recurring: [
-      {
-        id: "rec-rent",
-        name: "Rent",
-        categorySlug: "bills-data",
-        amountMinor: 1_200_000,
-        frequency: "monthly",
-        dayOfMonth: 1,
-        nextRunDate: nextMonthOn(1),
-        lastRunDate: `${currentLocalMonth()}-01`,
-        autoLog: true,
-        isActive: true,
-      },
-      {
-        id: "rec-net",
-        name: "Internet",
-        categorySlug: "bills-data",
-        amountMinor: 120_000,
-        frequency: "monthly",
-        dayOfMonth: 5,
-        nextRunDate: nextMonthOn(5),
-        lastRunDate: `${currentLocalMonth()}-05`,
-        autoLog: true,
-        isActive: true,
-      },
-    ],
-    online: true,
-    hydrated: false,
-  };
-};
+export const createInitialState = (): TallyState => ({
+  profile: {
+    userId: null,
+    email: "",
+    displayName: "",
+    currency: "BDT",
+    appearance: "system",
+    signedIn: false,
+    authProvider: null,
+    onboardingCompleted: false,
+    totalTaps: 0,
+  },
+  settings: { strikeAt: 5, longPressMs: 430, pressDepth: 3 },
+  categories: CATEGORIES,
+  tiles: seedTiles(),
+  expenses: [],
+  budgets: [],
+  habits: [],
+  goals: [],
+  recurring: [],
+  online: true,
+  hydrated: false,
+});

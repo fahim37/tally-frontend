@@ -21,13 +21,15 @@ const DURATION_MS = 4200;
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [current, setCurrent] = useState<ToastState | null>(null);
+  const [leaving, setLeaving] = useState(false);
   const timer = useRef<number | null>(null);
   const nextId = useRef(0);
 
   const dismiss = useCallback(() => {
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = null;
-    setCurrent(null);
+    // Play the exit rather than cutting; the node unmounts on animationend.
+    setLeaving(true);
   }, []);
 
   const toast = useCallback<ToastContextValue["toast"]>(
@@ -35,8 +37,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       if (timer.current) window.clearTimeout(timer.current);
       // One toast at a time — a rapid burst of taps should replace the
       // message, not stack five undo prompts the user has to dismiss.
+      setLeaving(false);
       setCurrent({ id: nextId.current++, message, ...options });
-      timer.current = window.setTimeout(() => setCurrent(null), DURATION_MS);
+      timer.current = window.setTimeout(() => setLeaving(true), DURATION_MS);
     },
     []
   );
@@ -50,19 +53,32 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none fixed inset-x-0 z-40 flex justify-center px-4"
-          style={{ bottom: "calc(96px + env(safe-area-inset-bottom))" }}
+          className="pointer-events-none fixed inset-x-0 z-40 flex justify-center px-5"
+          style={{
+            // Clears the nav, and rides above the soft keyboard when one is
+            // open — a confirmation the keyboard covers may as well not exist.
+            // The safe-area inset is added once, here, not also on body.
+            bottom: "calc(96px + var(--safe-b) + var(--kb))",
+            transition: "bottom var(--dur-base) var(--ease-out)",
+          }}
         >
           <div
-            className="pointer-events-auto flex w-full max-w-[440px] items-center gap-3 rounded-[14px] px-4 py-3"
+            onAnimationEnd={(event) => {
+              if (event.animationName !== "toastOut") return;
+              setCurrent(null);
+              setLeaving(false);
+            }}
+            className="pointer-events-auto flex w-full max-w-[440px] items-center gap-3 rounded-card px-4 py-3"
             style={{
               background: "var(--text)",
               color: "var(--bg)",
               boxShadow: "var(--lift)",
-              animation: "fadeIn .18s ease both",
+              animation: leaving
+                ? "toastOut var(--dur-base) var(--ease-out) both"
+                : "toastIn var(--dur-base) var(--ease-spring) both",
             }}
           >
-            <span className="flex-1 text-[13px] font-medium">{current.message}</span>
+            <span className="flex-1 text-body font-medium">{current.message}</span>
 
             {current.actionLabel && (
               <button
@@ -71,7 +87,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                   current.onAction?.();
                   dismiss();
                 }}
-                className="rounded-[9px] px-2.5 py-1.5 text-[13px] font-semibold"
+                className="tap-target shrink-0 rounded-[10px] px-3 py-2 text-body font-semibold"
                 style={{ color: "var(--blue-200)" }}
               >
                 {current.actionLabel}
@@ -82,10 +98,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={dismiss}
               aria-label="Dismiss"
-              className="opacity-60"
+              className="tap-target shrink-0 opacity-70"
               style={{ color: "var(--bg)" }}
             >
-              <Icon name="plus" size={16} strokeWidth={2} className="rotate-45" />
+              <Icon name="plus" size={18} strokeWidth={2} className="rotate-45" />
             </button>
           </div>
         </div>

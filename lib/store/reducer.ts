@@ -1,10 +1,12 @@
 import { todayLocalDate, toLocalMonth, fromLocalDate, currentLocalMonth } from "../date";
-import type {
-  LocalExpense,
-  LocalGoal,
-  LocalRecurring,
-  LocalTile,
-  TallyState,
+import type { AuthUser } from "../auth";
+import {
+  createInitialState,
+  type LocalExpense,
+  type LocalGoal,
+  type LocalRecurring,
+  type LocalTile,
+  type TallyState,
 } from "./state";
 
 /**
@@ -16,6 +18,16 @@ export type TallyAction =
   /** `state: null` means nothing was persisted — keep the seed, just mark ready. */
   | { type: "HYDRATE"; state: TallyState | null }
   | { type: "TAP_TILE"; tileId: string }
+  /** A "prompt" tile logging a one-off amount the user just entered.
+   *  `label` optionally names *what* it was ("Biryani"), replacing the tile's
+   *  own name on that one row. */
+  | {
+      type: "LOG_TILE_AMOUNT";
+      tileId: string;
+      amountMinor: number;
+      quantity?: number;
+      label?: string;
+    }
   | { type: "SET_QUANTITY"; tileId: string; localDate: string; quantity: number }
   | { type: "SET_TILE_AMOUNT"; tileId: string; amountMinor: number }
   | { type: "ADD_TILE"; tile: Omit<LocalTile, "id" | "usageCount" | "lastUsedAt" | "sortIndex"> }
@@ -41,6 +53,8 @@ export type TallyAction =
   | { type: "UPDATE_SETTINGS"; patch: Partial<TallyState["settings"]> }
   | { type: "SET_ONLINE"; online: boolean }
   | { type: "MARK_SYNCED"; expenseIds: string[] }
+  | { type: "SIGN_IN"; user: AuthUser }
+  | { type: "SIGN_OUT" }
   | { type: "RESET" };
 
 const uid = (prefix: string) =>
@@ -134,12 +148,117 @@ export const reducer = (state: TallyState, action: TallyAction): TallyState => {
     case "TAP_TILE":
       return applyTap(state, action.tileId, 1);
 
+    case "LOG_TILE_AMOUNT": {
+      const tile = state.tiles.find((t) => t.id === action.tileId);
+      if (!tile || action.amountMinor <= 0) return state;
+
+      const quantity = Math.max(1, action.quantity ?? 1);
+      const now = new Date();
+
+      // Deliberately NOT the tap-upsert. A fixed-price tile can merge today's
+      // taps into one "×7" row because every one of them cost the same. A
+      // prompt tile's entries don't — folding a ৳60 breakfast and a ৳420
+      // dinner into "Food ×2" would invent a unit price that was never paid
+      // and make the day impossible to read back.
+      const label = action.label?.trim();
+
+      const expense = withTotal({
+        id: uid("exp"),
+        tileId: tile.id,
+        categorySlug: tile.categorySlug,
+        // The label replaces the tile's name on this row rather than sitting
+        // in `note`, because History lists rows by name — "Biryani ৳420" is
+        // the line worth reading back, not a third "Food" among five.
+        // `tileId` still links it to the tile for every rollup.
+        name: label || tile.name,
+        unitAmountMinor: action.amountMinor,
+        quantity,
+        totalAmountMinor: 0,
+        occurredAt: now.toISOString(),
+        localDate: todayLocalDate(),
+        localMonth: toLocalMonth(now),
+        source: "tap",
+        pendingSync: true,
+        deletedAt: null,
+      });
+
+      return {
+        ...state,
+        expenses: [...state.expenses, expense],
+        tiles: state.tiles.map((t) =>
+          t.id === tile.id
+            ? {
+                ...t,
+                usageCount: t.usageCount + quantity,
+                lastUsedAt: now.toISOString(),
+                // The amount just used becomes the one the keypad opens with
+                // next time — the best available guess at what this costs.
+                defaultAmountMinor: action.amountMinor,
+              }
+            : t
+        ),
+        profile: {
+          ...state.profile,
+          totalTaps: state.profile.totalTaps + quantity,
+        },
+      };
+    }
+
     case "SET_QUANTITY": {
-      const existing = state.expenses.find(
+      const matching = state.expenses.filter(
         (e) => e.tileId === action.tileId && e.localDate === action.localDate && !e.deletedAt
       );
-      const current = existing?.quantity ?? 0;
-      return applyTap(state, action.tileId, action.quantity - current);
+      const current = matching.reduce((sum, expense) => sum + expense.quantity, 0);
+      const target = Math.max(0, Math.floor(action.quantity));
+      const delta = target - current;
+
+      if (delta === 0) return state;
+      if (delta > 0) return applyTap(state, action.tileId, delta);
+
+      // `todayCount` is an aggregate across every row for this tile. A tile can
+      // have several rows after changing entry mode or logging custom amounts,
+      // so reducing only the first row does not set the displayed total. Remove
+      // units from the newest rows until the aggregate reaches the requested
+      // value, preserving the amounts attached to earlier entries.
+      let remaining = -delta;
+      const adjusted = new Map<string, number>();
+      const newestFirst = [...matching].sort((a, b) =>
+        b.occurredAt.localeCompare(a.occurredAt)
+      );
+
+      for (const expense of newestFirst) {
+        if (remaining === 0) break;
+        const removed = Math.min(expense.quantity, remaining);
+        adjusted.set(expense.id, expense.quantity - removed);
+        remaining -= removed;
+      }
+
+      const changedAt = new Date().toISOString();
+
+      return {
+        ...state,
+        expenses: state.expenses.map((expense) => {
+          const quantity = adjusted.get(expense.id);
+          if (quantity === undefined) return expense;
+
+          // Keep a tombstone for sync instead of dropping an already-synced
+          // row locally; selectors ignore deleted rows immediately.
+          if (quantity === 0) {
+            return { ...expense, pendingSync: true, deletedAt: changedAt };
+          }
+
+          return withTotal({ ...expense, quantity, pendingSync: true });
+        }),
+        tiles: state.tiles.map((tile) =>
+          tile.id === action.tileId
+            ? { ...tile, usageCount: Math.max(0, tile.usageCount + delta) }
+            : tile
+        ),
+        profile: {
+          ...state.profile,
+          totalTaps: Math.max(0, state.profile.totalTaps + delta),
+        },
+      };
     }
 
     case "SET_TILE_AMOUNT": {
@@ -239,6 +358,30 @@ export const reducer = (state: TallyState, action: TallyAction): TallyState => {
         .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
       const last = todays[0];
       if (!last?.tileId) return state;
+
+      const tile = state.tiles.find((t) => t.id === last.tileId);
+
+      // A prompt tile writes one row per entry, so undo has to remove *that*
+      // row. Decrementing through applyTap would find the first row for the
+      // tile today rather than the newest one — with three Food entries
+      // logged, undoing the ৳420 dinner would quietly cancel the ৳60
+      // breakfast instead.
+      if (tile?.entry === "prompt") {
+        return {
+          ...state,
+          expenses: state.expenses.filter((e) => e.id !== last.id),
+          tiles: state.tiles.map((t) =>
+            t.id === tile.id
+              ? { ...t, usageCount: Math.max(0, t.usageCount - last.quantity) }
+              : t
+          ),
+          profile: {
+            ...state.profile,
+            totalTaps: Math.max(0, state.profile.totalTaps - last.quantity),
+          },
+        };
+      }
+
       return applyTap(state, last.tileId, -1);
     }
 
@@ -416,8 +559,38 @@ export const reducer = (state: TallyState, action: TallyAction): TallyState => {
       };
     }
 
+    case "SIGN_IN": {
+      const { user } = action;
+      return {
+        ...state,
+        profile: {
+          ...state.profile,
+          userId: user.id,
+          email: user.email,
+          displayName: user.displayName,
+          currency: user.currency,
+          appearance: user.appearance,
+          signedIn: true,
+          authProvider: user.authProviders.includes("google") ? "google" : "email",
+          onboardingCompleted: user.onboarding.completed,
+          // The server's tap count is authoritative across devices, but a
+          // fresh install has nothing local to contradict it.
+          totalTaps: Math.max(state.profile.totalTaps, user.stats.totalTaps),
+        },
+      };
+    }
+
+    case "SIGN_OUT":
+      // A fresh state, not a cleared profile. Leaving the previous account's
+      // expenses, budget and habits in memory would show them to whoever signs
+      // in next on this device.
+      return { ...createInitialState(), online: state.online, hydrated: true };
+
     case "RESET":
-      return state;
+      // Was `return state` — a silent no-op, so "reset all data" in Profile
+      // cleared localStorage and then reloaded straight back into the same
+      // in-memory store.
+      return { ...createInitialState(), online: state.online, hydrated: true };
 
     default:
       return state;

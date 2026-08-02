@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Icon } from "@/components/ui/Icon";
@@ -13,9 +14,21 @@ import { toCsv, downloadCsv } from "@/lib/csv";
 import { todayLocalDate } from "@/lib/date";
 
 export function Profile() {
-  const { state, dispatch, pendingCount, resetAll } = useTally();
+  const { state, dispatch, pendingCount, resetAll, signOut } = useTally();
   const { toast } = useToast();
+  const router = useRouter();
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const [confirmingSignOut, setConfirmingSignOut] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const leave = async () => {
+    setSigningOut(true);
+    // `signOut` revokes the refresh token, wipes the persisted store and
+    // resets the reducer. It resolves even if the network call fails —
+    // otherwise a dead connection would trap someone in an account.
+    await signOut();
+    router.replace("/signin");
+  };
 
   const streak = useMemo(() => loggingStreak(state), [state]);
   const activeTiles = state.tiles.filter((t) => !t.isArchived).length;
@@ -41,21 +54,21 @@ export function Profile() {
 
       {/* Account */}
       <Card className="mb-3">
-        <div className="flex items-center gap-3.5">
+        <div className="flex items-center gap-3">
           <span
-            className="flex size-[46px] items-center justify-center rounded-[15px] font-display text-[17px] font-semibold"
+            className="flex size-12 items-center justify-center rounded-card font-display text-subhead"
             style={{ background: "var(--sky)", color: "var(--blue)" }}
           >
             {initials}
           </span>
           <div className="min-w-0 flex-1">
             <p
-              className="truncate text-[15px] font-semibold leading-tight"
+              className="truncate text-subhead"
               style={{ color: "var(--text)" }}
             >
               {state.profile.displayName || "Your account"}
             </p>
-            <p className="mt-[3px] truncate text-[12px]" style={{ color: "var(--muted)" }}>
+            <p className="mt-1 truncate text-meta" style={{ color: "var(--muted)" }}>
               {state.profile.email}
             </p>
           </div>
@@ -66,36 +79,36 @@ export function Profile() {
       <div className="mb-3 flex gap-2.5">
         <Card className="flex-1">
           <p
-            className="text-[10px] font-semibold uppercase tracking-[0.12em]"
+            className="text-eyebrow uppercase"
             style={{ color: "var(--muted)" }}
           >
             Logged
           </p>
           <p
-            className="mt-2 font-display text-[24px] font-semibold leading-none tracking-[-0.03em] tabular-nums"
+            className="mt-2 font-display text-display tabular-nums"
             style={{ color: "var(--text)" }}
           >
             {state.profile.totalTaps.toLocaleString("en-IN")}
           </p>
-          <p className="mt-1.5 text-[11px]" style={{ color: "var(--muted)" }}>
+          <p className="mt-1.5 text-caption" style={{ color: "var(--muted)" }}>
             taps all time
           </p>
         </Card>
 
         <Card className="flex-1">
           <p
-            className="text-[10px] font-semibold uppercase tracking-[0.12em]"
-            style={{ color: "var(--teal)" }}
+            className="text-eyebrow uppercase"
+            style={{ color: "var(--teal-text)" }}
           >
             Streak
           </p>
           <p
-            className="mt-2 font-display text-[24px] font-semibold leading-none tracking-[-0.03em] tabular-nums"
-            style={{ color: "var(--teal)" }}
+            className="mt-2 font-display text-display tabular-nums"
+            style={{ color: "var(--teal-text)" }}
           >
             {streak}
           </p>
-          <p className="mt-1.5 text-[11px]" style={{ color: "var(--muted)" }}>
+          <p className="mt-1.5 text-caption" style={{ color: "var(--muted)" }}>
             days logged
           </p>
         </Card>
@@ -118,7 +131,7 @@ export function Profile() {
           <span style={{ color: "var(--muted)" }}>
             <Icon name="bill" size={18} strokeWidth={1.7} />
           </span>
-          <span className="flex-1 text-[14px]" style={{ color: "var(--text)" }}>
+          <span className="flex-1 text-label" style={{ color: "var(--text)" }}>
             Currency
           </span>
           <select
@@ -127,7 +140,7 @@ export function Profile() {
               dispatch({ type: "UPDATE_PROFILE", patch: { currency: event.target.value } })
             }
             aria-label="Currency"
-            className="bg-transparent font-mono text-[13px] outline-none"
+            className="bg-transparent font-mono text-body outline-none"
             style={{ color: "var(--muted)" }}
           >
             {Object.values(CURRENCIES).map((currency) => (
@@ -146,10 +159,10 @@ export function Profile() {
           <span style={{ color: "var(--muted)" }}>
             <Icon name="theme" size={18} strokeWidth={1.7} />
           </span>
-          <span className="flex-1 text-[14px]" style={{ color: "var(--text)" }}>
+          <span className="flex-1 text-label" style={{ color: "var(--text)" }}>
             Appearance
           </span>
-          <span className="flex rounded-pill p-[3px]" style={{ background: "var(--bg)" }}>
+          <span className="flex rounded-pill p-1" style={{ background: "var(--bg)" }}>
             {(["light", "dark", "system"] as const).map((mode) => {
               const active = state.profile.appearance === mode;
               return (
@@ -158,7 +171,7 @@ export function Profile() {
                   type="button"
                   onClick={() => dispatch({ type: "UPDATE_PROFILE", patch: { appearance: mode } })}
                   aria-pressed={active}
-                  className="tap-target rounded-pill px-2.5 py-1.5 text-[11px] font-medium capitalize"
+                  className="tap-target rounded-pill px-2.5 py-1.5 text-caption font-medium capitalize"
                   style={{
                     background: active ? "var(--surf)" : "transparent",
                     color: active ? "var(--text)" : "var(--muted)",
@@ -180,10 +193,10 @@ export function Profile() {
           <span style={{ color: "var(--muted)" }}>
             <Icon name="habits" size={18} strokeWidth={1.7} />
           </span>
-          <span className="flex-1 text-[14px]" style={{ color: "var(--text)" }}>
+          <span className="flex-1 text-label" style={{ color: "var(--text)" }}>
             Strike every
           </span>
-          <span className="flex rounded-pill p-[3px]" style={{ background: "var(--bg)" }}>
+          <span className="flex rounded-pill p-1" style={{ background: "var(--bg)" }}>
             {[4, 5, 6].map((value) => {
               const active = state.settings.strikeAt === value;
               return (
@@ -192,7 +205,7 @@ export function Profile() {
                   type="button"
                   onClick={() => dispatch({ type: "UPDATE_SETTINGS", patch: { strikeAt: value } })}
                   aria-pressed={active}
-                  className="tap-target rounded-pill px-3 py-1.5 font-mono text-[11px] font-medium"
+                  className="tap-target rounded-pill px-3 py-1.5 font-mono text-caption font-medium"
                   style={{
                     background: active ? "var(--surf)" : "transparent",
                     color: active ? "var(--text)" : "var(--muted)",
@@ -209,10 +222,10 @@ export function Profile() {
           <span style={{ color: "var(--muted)" }}>
             <Icon name="home" size={18} strokeWidth={1.7} />
           </span>
-          <span className="flex-1 text-[14px]" style={{ color: "var(--text)" }}>
+          <span className="flex-1 text-label" style={{ color: "var(--text)" }}>
             Tiles
           </span>
-          <span className="text-[13px]" style={{ color: "var(--muted)" }}>
+          <span className="text-body" style={{ color: "var(--muted)" }}>
             {activeTiles} active
           </span>
         </div>
@@ -220,7 +233,7 @@ export function Profile() {
 
       {/* Data */}
       <Card className="mb-3" title="Your data">
-        <p className="mb-3.5 text-[13px] leading-[1.5]" style={{ color: "var(--muted)" }}>
+        <p className="mb-3.5 text-body leading-[1.5]" style={{ color: "var(--muted)" }}>
           Everything is stored on this device and works offline.
           {pendingCount > 0
             ? ` ${pendingCount} ${pendingCount === 1 ? "entry is" : "entries are"} waiting to sync.`
@@ -230,7 +243,7 @@ export function Profile() {
         <button
           type="button"
           onClick={exportCsv}
-          className="w-full rounded-[12px] border py-3.5 text-[14px] font-medium"
+          className="w-full rounded-card border py-3.5 text-label font-medium"
           style={{ borderColor: "var(--line)", color: "var(--text)" }}
         >
           Export everything as CSV
@@ -239,14 +252,14 @@ export function Profile() {
 
       {confirmingReset ? (
         <Card>
-          <p className="mb-3.5 text-[14px] leading-[1.5]" style={{ color: "var(--text)" }}>
+          <p className="mb-3.5 text-label leading-[1.5]" style={{ color: "var(--text)" }}>
             This clears every expense, tile and budget on this device. It can&apos;t be undone.
           </p>
           <div className="flex gap-2.5">
             <button
               type="button"
               onClick={() => setConfirmingReset(false)}
-              className="flex-1 rounded-[12px] border py-3.5 text-[14px] font-medium"
+              className="flex-1 rounded-card border py-3.5 text-label font-medium"
               style={{ borderColor: "var(--line)", color: "var(--text)" }}
             >
               Keep it
@@ -254,7 +267,7 @@ export function Profile() {
             <button
               type="button"
               onClick={resetAll}
-              className="flex-1 rounded-[12px] py-3.5 text-[14px] font-semibold"
+              className="flex-1 rounded-card py-3.5 text-label font-semibold"
               style={{ background: "var(--amber)", color: "#0B1220" }}
             >
               Erase everything
@@ -265,10 +278,61 @@ export function Profile() {
         <button
           type="button"
           onClick={() => setConfirmingReset(true)}
-          className="w-full rounded-[14px] border py-3.5 text-[14px] font-medium"
+          className="w-full rounded-card border py-3.5 text-label font-medium"
           style={{ borderColor: "var(--line)", color: "var(--muted)" }}
         >
           Reset all data
+        </button>
+      )}
+
+      {/* Sign out */}
+      {confirmingSignOut ? (
+        <Card className="mt-3">
+          <p className="mb-3.5 text-label" style={{ color: "var(--text)" }}>
+            Signing out clears this device. Your account keeps everything that has synced —
+            {pendingCount > 0 ? (
+              <>
+                {" "}
+                but{" "}
+                <strong style={{ color: "var(--amber-text)" }}>
+                  {pendingCount} {pendingCount === 1 ? "entry hasn't" : "entries haven't"}{" "}
+                  synced yet
+                </strong>{" "}
+                and will be lost.
+              </>
+            ) : (
+              <> and nothing is waiting to sync.</>
+            )}
+          </p>
+          <div className="flex gap-2.5">
+            <button
+              type="button"
+              onClick={() => setConfirmingSignOut(false)}
+              disabled={signingOut}
+              className="flex-1 rounded-card border py-3.5 text-label font-medium disabled:opacity-50"
+              style={{ borderColor: "var(--line)", color: "var(--text)" }}
+            >
+              Stay
+            </button>
+            <button
+              type="button"
+              onClick={leave}
+              disabled={signingOut}
+              className="flex-1 rounded-card py-3.5 text-label font-semibold disabled:opacity-60"
+              style={{ background: "var(--text)", color: "var(--bg)" }}
+            >
+              {signingOut ? "Signing out…" : "Sign out"}
+            </button>
+          </div>
+        </Card>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirmingSignOut(true)}
+          className="mt-3 w-full rounded-card border py-3.5 text-label font-medium"
+          style={{ borderColor: "var(--line)", color: "var(--muted)" }}
+        >
+          Sign out
         </button>
       )}
     </div>
@@ -285,7 +349,7 @@ function Row({ href, icon, label }: { href: string; icon: string; label: string 
       <span style={{ color: "var(--muted)" }}>
         <Icon name={icon} size={18} strokeWidth={1.7} />
       </span>
-      <span className="flex-1 text-[14px]">{label}</span>
+      <span className="flex-1 text-label">{label}</span>
       <span style={{ color: "var(--faint)" }}>
         <Icon name="chevronRight" size={16} strokeWidth={2} />
       </span>

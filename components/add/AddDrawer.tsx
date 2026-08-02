@@ -28,7 +28,7 @@ export function AddDrawer({ open, onClose }: AddDrawerProps) {
   return (
     <Sheet open={open} onClose={onClose} label="Add an expense">
       <div
-        className="mb-5 flex rounded-[12px] p-[3px]"
+        className="mb-5 flex rounded-card p-1"
         style={{ background: "var(--bg)" }}
         role="tablist"
         aria-label="How to add"
@@ -42,7 +42,7 @@ export function AddDrawer({ open, onClose }: AddDrawerProps) {
               role="tab"
               aria-selected={active}
               onClick={() => setTab(key)}
-              className="flex-1 rounded-[9px] py-2.5 text-[13px] font-medium capitalize transition-colors"
+              className="flex-1 rounded-[10px] py-2.5 text-body font-medium capitalize transition-colors"
               style={{
                 background: active ? "var(--surf)" : "transparent",
                 color: active ? "var(--text)" : "var(--muted)",
@@ -81,12 +81,12 @@ function TapTab({ onClose }: { onClose: () => void }) {
     <div>
       <div className="mb-3 flex items-center justify-between">
         <span
-          className="text-[10px] font-semibold uppercase tracking-[0.12em]"
+          className="text-eyebrow uppercase"
           style={{ color: "var(--muted)" }}
         >
           Pick one
         </span>
-        <span className="text-[11px]" style={{ color: "var(--faint)" }}>
+        <span className="text-caption" style={{ color: "var(--faint)" }}>
           Logs on tap, no confirm
         </span>
       </div>
@@ -97,7 +97,7 @@ function TapTab({ onClose }: { onClose: () => void }) {
             key={tile.id}
             type="button"
             onClick={() => log(tile.id, tile.name, tile.amountMinor)}
-            className="flex h-[88px] flex-col items-start justify-between rounded-[16px] border p-2.5 text-left transition-colors"
+            className="flex h-22 flex-col items-start justify-between rounded-card border p-2.5 text-left transition-colors"
             style={{ background: "var(--bg)", borderColor: "var(--line)" }}
           >
             <span style={{ color: "var(--blue)" }}>
@@ -105,13 +105,13 @@ function TapTab({ onClose }: { onClose: () => void }) {
             </span>
             <span className="w-full">
               <span
-                className="block text-[12px] font-medium leading-tight"
+                className="block text-meta font-medium leading-tight"
                 style={{ color: "var(--text)" }}
               >
                 {tile.name}
               </span>
               <span
-                className="mt-[3px] block font-mono text-[11px] tabular-nums"
+                className="mt-1 block font-mono text-caption tabular-nums"
                 style={{ color: "var(--muted)" }}
               >
                 {formatMoney(tile.amountMinor, state.profile.currency)}
@@ -124,7 +124,7 @@ function TapTab({ onClose }: { onClose: () => void }) {
       <button
         type="button"
         onClick={onClose}
-        className="mt-4 w-full rounded-[14px] py-4 text-[15px] font-semibold"
+        className="mt-4 w-full rounded-card py-4 text-label font-semibold"
         style={{ background: "var(--blue)", color: "#FFFFFF" }}
       >
         Done
@@ -180,7 +180,7 @@ function TypeTab({ onClose }: { onClose: () => void }) {
   return (
     <div>
       <label
-        className="mb-2.5 block text-[10px] font-semibold uppercase tracking-[0.12em]"
+        className="mb-2.5 block text-eyebrow uppercase"
         style={{ color: "var(--muted)" }}
         htmlFor="type-input"
       >
@@ -193,7 +193,7 @@ function TypeTab({ onClose }: { onClose: () => void }) {
         onChange={(event) => setText(event.target.value)}
         placeholder="lunch 250 and 40 rickshaw"
         autoComplete="off"
-        className="w-full rounded-[14px] border px-3.5 py-4 text-[15px] outline-none"
+        className="w-full rounded-card border px-3.5 py-4 text-label outline-none"
         style={{
           background: "var(--surf)",
           borderColor: text ? "var(--blue)" : "var(--line)",
@@ -203,19 +203,19 @@ function TypeTab({ onClose }: { onClose: () => void }) {
 
       <div className="mb-2.5 mt-5 flex items-center justify-between">
         <span
-          className="text-[10px] font-semibold uppercase tracking-[0.12em]"
+          className="text-eyebrow uppercase"
           style={{ color: "var(--muted)" }}
         >
           Parsed
         </span>
-        <span className="font-mono text-[12px] tabular-nums" style={{ color: "var(--text)" }}>
+        <span className="font-mono text-meta tabular-nums" style={{ color: "var(--text)" }}>
           {formatMoney(total, currency)}
         </span>
       </div>
 
       <div className="flex min-h-[120px] flex-col gap-2">
         {items.length === 0 && (
-          <p className="py-6 text-center text-[13px]" style={{ color: "var(--faint)" }}>
+          <p className="py-6 text-center text-body" style={{ color: "var(--faint)" }}>
             Type an amount and what it was for.
           </p>
         )}
@@ -223,11 +223,11 @@ function TypeTab({ onClose }: { onClose: () => void }) {
         {items.map((item) => (
           <div
             key={item.key}
-            className="flex items-center gap-3 rounded-[14px] border p-3"
+            className="flex items-center gap-3 rounded-card border p-3"
             style={{ background: "var(--bg)", borderColor: "var(--line)" }}
           >
             <span
-              className="flex size-[34px] shrink-0 items-center justify-center rounded-[11px]"
+              className="flex size-9 shrink-0 items-center justify-center rounded-card"
               style={{ background: "var(--sky)", color: "var(--blue)" }}
             >
               <Icon name={item.iconKey} size={18} strokeWidth={1.6} />
@@ -235,20 +235,20 @@ function TypeTab({ onClose }: { onClose: () => void }) {
 
             <span className="min-w-0 flex-1">
               <span
-                className="block truncate text-[13px] font-medium"
+                className="block truncate text-body font-medium"
                 style={{ color: "var(--text)" }}
               >
                 {item.name}
                 {item.quantity > 1 && ` ×${item.quantity}`}
               </span>
-              <span className="block text-[11px]" style={{ color: "var(--muted)" }}>
+              <span className="block text-caption" style={{ color: "var(--muted)" }}>
                 {item.categoryName}
                 {!item.matched && " · tap to change"}
               </span>
             </span>
 
             <span
-              className="font-mono text-[14px] tabular-nums"
+              className="font-mono text-label tabular-nums"
               style={{ color: item.amountMinor === null ? "var(--faint)" : "var(--text)" }}
             >
               {item.amountMinor === null
@@ -263,7 +263,7 @@ function TypeTab({ onClose }: { onClose: () => void }) {
         type="button"
         onClick={commit}
         disabled={!loggable.length}
-        className="mt-4 w-full rounded-[14px] py-4 text-[15px] font-semibold transition-opacity disabled:opacity-40"
+        className="mt-4 w-full rounded-card py-4 text-label font-semibold transition-opacity disabled:opacity-40"
         style={{ background: "var(--blue)", color: "#FFFFFF" }}
       >
         {loggable.length > 1 ? `Log ${loggable.length} expenses` : "Log expense"}

@@ -78,18 +78,26 @@ export interface TotalDigit {
 export const toTotalDigits = (
   minor: number,
   code = DEFAULT_CURRENCY
-): TotalDigit[] =>
-  formatMoney(minor, code, { withSymbol: false })
-    .split("")
-    .map((char, i) => {
-      const isDigit = /[0-9]/.test(char);
-      return {
-        key: `d${i}`,
-        char,
-        isDigit,
-        shift: `translateY(-${isDigit ? Number(char) : 0}em)`,
-      };
-    });
+): TotalDigit[] => {
+  const chars = formatMoney(minor, code, { withSymbol: false }).split("");
+
+  return chars.map((char, i) => {
+    const isDigit = /[0-9]/.test(char);
+    return {
+      // Keyed from the RIGHT, not the left. A digit's identity is its place
+      // value: the units column stays the units column when 99 becomes 100.
+      // Keying by index from the left shifts every position by one as the
+      // number grows, so React reuses each DOM node for a different place and
+      // the CSS transition rolls each strip backwards through eight digits —
+      // a visible glitch in the app's signature animation, on the one event
+      // it most wants to celebrate.
+      key: `p${chars.length - 1 - i}`,
+      char,
+      isDigit,
+      shift: `translateY(-${isDigit ? Number(char) : 0}em)`,
+    };
+  });
+};
 
 /**
  * Tally marks: groups of `strikeAt` where the last stroke crosses the group.

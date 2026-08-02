@@ -5,64 +5,74 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { useTally } from "@/lib/store/TallyProvider";
 import { padTiles } from "@/lib/store/selectors";
-import { CURRENCIES, formatMoney, getCurrency, toMinor } from "@/lib/money";
+import { formatMoney, getCurrency, toMinor } from "@/lib/money";
 import { currentLocalMonth, daysInMonth } from "@/lib/date";
+import { updateAccount } from "@/lib/auth";
 
+/** Starting points, not data — nothing is saved unless it's tapped. */
 const SUGGESTED_BUDGETS = [1_200_000, 1_800_000, 2_500_000, 4_000_000];
 
 /**
- * Three steps: what you spend in, what a month looks like, what you buy.
+ * Two steps: what a month looks like and what you buy most days.
  *
- * Every step has a working default already applied, so "Next" is always
- * available and the whole flow is skippable — the account is usable before
- * this runs, and this only revises it. Step three teaches the tap gesture on
- * the real tiles before the home screen ever appears.
+ * The whole flow is skippable — the account is already usable when this runs,
+ * and this only revises it. Step two teaches the tap gesture on the real
+ * tiles before the home screen ever appears.
  */
 export function Onboarding() {
-  const { dispatch } = useTally();
+  const { state, dispatch } = useTally();
   const router = useRouter();
   const [step, setStep] = useState(1);
 
   const finish = () => {
     dispatch({ type: "UPDATE_PROFILE", patch: { onboardingCompleted: true } });
+
+    // Told to the server so a reinstall doesn't walk the user through this
+    // again — but not awaited, and a failure is ignored. Onboarding finishing
+    // is a local fact; blocking the way into the app on a round trip would
+    // mean a dead connection traps someone on step two.
+    void updateAccount({
+      currency: state.profile.currency,
+      onboarding: { completed: true, step: 2 },
+    });
+
     router.replace("/");
   };
 
   return (
-    <div className="flex min-h-dvh flex-col px-6 pb-10 pt-8">
+    <div className="flex min-h-dvh flex-col px-5 pt-8 pb-10">
       {/* Progress — the design's tally-stroke stepper */}
       <div className="mb-8 flex items-center gap-3">
         <span className="flex gap-1.5">
-          {[1, 2, 3].map((n) => (
+          {[1, 2].map((n) => (
             <span
               key={n}
-              className="w-[2.5px] rounded-[2px]"
+              className="w-[2.5px] rounded-xs"
               style={{ height: 15, background: n <= step ? "var(--blue)" : "var(--line)" }}
             />
           ))}
         </span>
         <span
-          className="text-[11px] font-medium uppercase tracking-[0.08em]"
+          className="text-eyebrow uppercase"
           style={{ color: "var(--muted)" }}
         >
-          Step {step} of 3
+          Step {step} of 2
         </span>
 
         <button
           type="button"
           onClick={finish}
-          className="tap-target ml-auto px-1.5 text-[13px] font-medium"
+          className="tap-target ml-auto px-1.5 text-body font-medium"
           style={{ color: "var(--muted)" }}
         >
           Skip
         </button>
       </div>
 
-      {step === 1 && <CurrencyStep onNext={() => setStep(2)} />}
-      {step === 2 && <BudgetStep onNext={() => setStep(3)} onBack={() => setStep(1)} />}
-      {step === 3 && <HabitsStep onFinish={finish} onBack={() => setStep(2)} />}
+      {step === 1 && <BudgetStep onNext={() => setStep(2)} />}
+      {step === 2 && <HabitsStep onFinish={finish} onBack={() => setStep(1)} />}
 
-      <p className="mt-6 text-center text-[12px]" style={{ color: "var(--faint)" }}>
+      <p className="mt-6 text-center text-meta" style={{ color: "var(--faint)" }}>
         You can change any of this later in Profile.
       </p>
     </div>
@@ -71,92 +81,14 @@ export function Onboarding() {
 
 // ── Step 1 ─────────────────────────────────────────────────────────────────
 
-function CurrencyStep({ onNext }: { onNext: () => void }) {
-  const { state, dispatch } = useTally();
-  const selected = state.profile.currency;
-
-  return (
-    <div className="flex flex-1 flex-col">
-      <h1
-        className="mb-2.5 font-display text-[30px] font-semibold leading-[1.12] tracking-[-0.035em]"
-        style={{ color: "var(--text)" }}
-      >
-        Which currency do you spend in?
-      </h1>
-      <p className="mb-7 text-[15px] leading-[1.5]" style={{ color: "var(--muted)" }}>
-        Every amount in Tally uses it.
-      </p>
-
-      <div className="flex flex-col gap-2.5">
-        {Object.values(CURRENCIES).map((currency) => {
-          const active = currency.code === selected;
-          return (
-            <button
-              key={currency.code}
-              type="button"
-              onClick={() =>
-                dispatch({ type: "UPDATE_PROFILE", patch: { currency: currency.code } })
-              }
-              aria-pressed={active}
-              className="flex items-center gap-3.5 rounded-[14px] border p-4 text-left"
-              style={{
-                background: active ? "var(--sky)" : "transparent",
-                borderColor: active ? "var(--blue)" : "var(--line)",
-                borderWidth: active ? 1.5 : 1,
-              }}
-            >
-              <span
-                className="flex size-[38px] items-center justify-center rounded-[12px] font-mono text-[18px] font-semibold"
-                style={{
-                  background: active ? "var(--surf)" : "var(--bg)",
-                  color: active ? "var(--blue)" : "var(--muted)",
-                }}
-              >
-                {currency.symbol}
-              </span>
-              <span className="flex-1">
-                <span
-                  className="block text-[15px] font-medium leading-tight"
-                  style={{ color: "var(--text)" }}
-                >
-                  {currency.code}
-                </span>
-                <span className="mt-[3px] block text-[12px]" style={{ color: "var(--muted)" }}>
-                  {formatMoney(125_000, currency.code)}
-                </span>
-              </span>
-              {active && (
-                <span style={{ color: "var(--blue)" }}>
-                  <Icon name="check" size={19} strokeWidth={2.2} />
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      <button
-        type="button"
-        onClick={onNext}
-        className="mt-8 w-full rounded-[14px] py-4 text-[15px] font-semibold"
-        style={{ background: "var(--blue)", color: "#FFFFFF" }}
-      >
-        Next
-      </button>
-    </div>
-  );
-}
-
-// ── Step 2 ─────────────────────────────────────────────────────────────────
-
-function BudgetStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+function BudgetStep({ onNext }: { onNext: () => void }) {
   const { state, dispatch } = useTally();
   const currency = state.profile.currency;
   const month = currentLocalMonth();
 
   const current =
-    state.budgets.find((b) => b.month === month)?.overallLimitMinor ?? 1_800_000;
-  const [text, setText] = useState(String(current / 100));
+    state.budgets.find((b) => b.month === month)?.overallLimitMinor ?? null;
+  const [text, setText] = useState(current === null ? "" : String(current / 100));
 
   const minor = toMinor(text, currency) ?? 0;
   const perDay = minor > 0 ? Math.round(minor / daysInMonth(month) / 100) * 100 : 0;
@@ -174,12 +106,12 @@ function BudgetStep({ onNext, onBack }: { onNext: () => void; onBack: () => void
   return (
     <div className="flex flex-1 flex-col">
       <h1
-        className="mb-2.5 font-display text-[30px] font-semibold leading-[1.12] tracking-[-0.035em]"
+        className="mb-2.5 font-display text-display"
         style={{ color: "var(--text)" }}
       >
         What&apos;s a normal month for you?
       </h1>
-      <p className="mb-8 text-[15px] leading-[1.5]" style={{ color: "var(--muted)" }}>
+      <p className="mb-8 text-label leading-[1.5]" style={{ color: "var(--muted)" }}>
         A rough number is enough. Tally works out the daily pace from it.
       </p>
 
@@ -187,20 +119,24 @@ function BudgetStep({ onNext, onBack }: { onNext: () => void; onBack: () => void
         className="mb-3 flex items-baseline gap-1.5 border-b-2 pb-4"
         style={{ borderColor: "var(--blue)" }}
       >
-        <span className="font-display text-[30px] font-semibold" style={{ color: "var(--muted)" }}>
+        <span className="font-display text-display" style={{ color: "var(--muted)" }}>
           {getCurrency(currency).symbol}
         </span>
+        {/* Starts empty. It used to open pre-filled with ৳18,000 — a number
+            nobody chose, which "Next" then saved as if they had. */}
         <input
           value={text}
           onChange={(event) => setText(event.target.value.replace(/[^\d.]/g, ""))}
           inputMode="numeric"
+          autoFocus
+          placeholder="0"
           aria-label="Monthly budget"
-          className="w-full min-w-0 bg-transparent font-display text-[46px] font-semibold tracking-[-0.04em] tabular-nums outline-none"
+          className="w-full min-w-0 bg-transparent font-display text-hero tabular-nums outline-none placeholder:opacity-30"
           style={{ color: "var(--text)" }}
         />
       </div>
 
-      <p className="mb-7 text-[13px]" style={{ color: "var(--muted)" }}>
+      <p className="mb-6 text-body" style={{ color: "var(--muted)" }}>
         {perDay > 0 ? (
           <>
             That&apos;s{" "}
@@ -223,7 +159,7 @@ function BudgetStep({ onNext, onBack }: { onNext: () => void; onBack: () => void
               type="button"
               onClick={() => commit(value)}
               aria-pressed={active}
-              className="tap-target rounded-pill border px-4 py-2.5 font-mono text-[13px] font-medium"
+              className="tap-target rounded-pill border px-4 py-2.5 font-mono text-body font-medium"
               style={{
                 background: active ? "var(--sky)" : "transparent",
                 borderColor: active ? "var(--blue)" : "var(--line)",
@@ -239,17 +175,9 @@ function BudgetStep({ onNext, onBack }: { onNext: () => void; onBack: () => void
       <div className="mt-auto flex gap-2.5 pt-8">
         <button
           type="button"
-          onClick={onBack}
-          className="rounded-[14px] border px-6 py-4 text-[15px] font-medium"
-          style={{ borderColor: "var(--line)", color: "var(--text)" }}
-        >
-          Back
-        </button>
-        <button
-          type="button"
           onClick={next}
           disabled={minor <= 0}
-          className="flex-1 rounded-[14px] py-4 text-[15px] font-semibold disabled:opacity-40"
+          className="flex-1 rounded-card py-4 text-label font-semibold disabled:opacity-40"
           style={{ background: "var(--blue)", color: "#FFFFFF" }}
         >
           Next
@@ -259,7 +187,7 @@ function BudgetStep({ onNext, onBack }: { onNext: () => void; onBack: () => void
   );
 }
 
-// ── Step 3 ─────────────────────────────────────────────────────────────────
+// ── Step 2 ─────────────────────────────────────────────────────────────────
 
 function HabitsStep({ onFinish, onBack }: { onFinish: () => void; onBack: () => void }) {
   const { state, dispatch } = useTally();
@@ -300,12 +228,12 @@ function HabitsStep({ onFinish, onBack }: { onFinish: () => void; onBack: () => 
   return (
     <div className="flex flex-1 flex-col">
       <h1
-        className="mb-2.5 font-display text-[30px] font-semibold leading-[1.12] tracking-[-0.035em]"
+        className="mb-2.5 font-display text-display"
         style={{ color: "var(--text)" }}
       >
         What do you buy most days?
       </h1>
-      <p className="mb-6 text-[15px] leading-[1.5]" style={{ color: "var(--muted)" }}>
+      <p className="mb-6 text-label leading-[1.5]" style={{ color: "var(--muted)" }}>
         These become your tap tiles. Tap one now — that&apos;s the whole gesture.
       </p>
 
@@ -320,11 +248,11 @@ function HabitsStep({ onFinish, onBack }: { onFinish: () => void; onBack: () => 
               data-tap
               onClick={() => toggle(tile.id)}
               aria-pressed={active}
-              className="relative flex h-[104px] flex-col items-start justify-between rounded-tile border p-3 text-left"
+              className="relative flex h-26 flex-col items-start justify-between rounded-tile border p-3 text-left"
               style={{
                 background: active ? "var(--sky)" : "var(--surf)",
                 borderColor: active ? "var(--blue)" : "var(--line)",
-                borderWidth: active ? 1.5 : 1,
+                borderWidth: 1.5,
                 transform: isTapped ? "translateY(3px) scale(.982)" : "none",
                 transition: "transform 90ms cubic-bezier(.3,.7,.4,1)",
               }}
@@ -334,13 +262,13 @@ function HabitsStep({ onFinish, onBack }: { onFinish: () => void; onBack: () => 
               </span>
               <span>
                 <span
-                  className="block text-[13px] font-medium leading-[1.15]"
+                  className="block text-body font-medium leading-[1.15]"
                   style={{ color: "var(--text)" }}
                 >
                   {tile.name}
                 </span>
                 <span
-                  className="mt-1 block font-mono text-[12px] tabular-nums"
+                  className="mt-1 block font-mono text-meta tabular-nums"
                   style={{ color: "var(--muted)" }}
                 >
                   {formatMoney(tile.amountMinor, currency)}
@@ -360,7 +288,7 @@ function HabitsStep({ onFinish, onBack }: { onFinish: () => void; onBack: () => 
         })}
       </div>
 
-      <p className="mt-5 text-[13px] leading-[1.45]" style={{ color: "var(--muted)" }}>
+      <p className="mt-5 text-body leading-[1.45]" style={{ color: "var(--muted)" }}>
         {picked.length === 0
           ? "Pick at least one to get started."
           : `${picked.length} picked. You can add, rename or reprice any tile later by long-pressing it.`}
@@ -370,7 +298,7 @@ function HabitsStep({ onFinish, onBack }: { onFinish: () => void; onBack: () => 
         <button
           type="button"
           onClick={onBack}
-          className="rounded-[14px] border px-6 py-4 text-[15px] font-medium"
+          className="rounded-card border px-5 py-4 text-label font-medium"
           style={{ borderColor: "var(--line)", color: "var(--text)" }}
         >
           Back
@@ -379,7 +307,7 @@ function HabitsStep({ onFinish, onBack }: { onFinish: () => void; onBack: () => 
           type="button"
           onClick={finish}
           disabled={picked.length === 0}
-          className="flex-1 rounded-[14px] py-4 text-[15px] font-semibold disabled:opacity-40"
+          className="flex-1 rounded-card py-4 text-label font-semibold disabled:opacity-40"
           style={{ background: "var(--blue)", color: "#FFFFFF" }}
         >
           Start tallying

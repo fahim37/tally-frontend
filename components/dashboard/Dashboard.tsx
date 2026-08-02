@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { Card, ProgressBar } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Icon } from "@/components/ui/Icon";
 import { useTally } from "@/lib/store/TallyProvider";
 import {
@@ -50,13 +51,15 @@ export function Dashboard() {
   const prevRatio =
     month.limitMinor > 0 ? month.previousSpentToSamePointMinor / month.limitMinor : 0;
 
+  const hasAnything = state.expenses.some((e) => !e.deletedAt);
+
   return (
-    <div className="px-5 pb-8 pt-6 lg:mx-auto lg:max-w-[1100px] lg:px-8">
+    <div className="px-5 pt-6 pb-8 lg:mx-auto lg:max-w-[1100px] lg:px-8">
       <PageHeader
         title="Dashboard"
         action={
           <span
-            className="tap-target rounded-pill border px-3 py-2 text-[12px] font-medium"
+            className="tap-target rounded-pill border px-3 py-2 text-meta font-medium"
             style={{ borderColor: "var(--line)", color: "var(--text)" }}
           >
             {monthLabel(month.month)}
@@ -64,24 +67,37 @@ export function Dashboard() {
         }
       />
 
+      {/* Every panel below this is a chart over history. With none, they'd all
+          render their full furniture around nothing — a heatmap of blank
+          cells, thirty zero-height bars, ৳0 against ৳0 — which reads as broken
+          rather than new. */}
+      {!hasAnything ? (
+        <EmptyState
+          icon="dashboard"
+          title="No spending to chart yet."
+          body="Log a few days and this fills with your category split, a 30-day trend and how this month compares to the last."
+          action={{ href: "/", label: "Log something" }}
+        />
+      ) : (
+
       <div className="flex flex-col gap-5 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6">
         {/* Today / month tiles */}
         <div className="flex gap-2.5 lg:col-span-2">
           <Card className="flex-1">
             <p
-              className="text-[10px] font-semibold uppercase tracking-[0.12em]"
+              className="text-eyebrow uppercase"
               style={{ color: "var(--muted)" }}
             >
               Today
             </p>
             <p
-              className="mt-2 font-display text-[27px] font-semibold leading-none tracking-[-0.03em] tabular-nums"
+              className="mt-2 font-display text-display tabular-nums"
               style={{ color: "var(--blue)" }}
             >
               {formatMoney(ring.spentMinor, currency)}
             </p>
             <p
-              className="mt-1.5 text-[11px]"
+              className="mt-1.5 text-caption"
               style={{ color: ring.isOver ? "var(--amber)" : "var(--teal)" }}
             >
               {ring.allowanceMinor === 0
@@ -94,18 +110,18 @@ export function Dashboard() {
 
           <Card className="flex-1">
             <p
-              className="text-[10px] font-semibold uppercase tracking-[0.12em]"
+              className="text-eyebrow uppercase"
               style={{ color: "var(--muted)" }}
             >
               Month so far
             </p>
             <p
-              className="mt-2 font-display text-[27px] font-semibold leading-none tracking-[-0.03em] tabular-nums"
+              className="mt-2 font-display text-display tabular-nums"
               style={{ color: "var(--text)" }}
             >
               {formatMoney(month.spentMinor, currency)}
             </p>
-            <p className="mt-1.5 text-[11px]" style={{ color: "var(--muted)" }}>
+            <p className="mt-1.5 text-caption" style={{ color: "var(--muted)" }}>
               {month.limitMinor > 0 ? `of ${formatMoney(month.limitMinor, currency)} · ` : ""}
               day {month.dayOfMonth}
             </p>
@@ -117,11 +133,11 @@ export function Dashboard() {
           <div className="flex flex-col gap-3">
             <div>
               <div className="mb-1.5 flex items-baseline justify-between">
-                <span className="text-[12px] font-medium" style={{ color: "var(--text)" }}>
+                <span className="text-meta font-medium" style={{ color: "var(--text)" }}>
                   {monthShort(month.month)}, day {month.dayOfMonth}
                 </span>
                 <span
-                  className="font-mono text-[13px] font-medium tabular-nums"
+                  className="font-mono text-body font-medium tabular-nums"
                   style={{ color: "var(--text)" }}
                 >
                   {formatMoney(month.spentMinor, currency)}
@@ -132,11 +148,11 @@ export function Dashboard() {
 
             <div>
               <div className="mb-1.5 flex items-baseline justify-between">
-                <span className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
+                <span className="text-meta font-medium" style={{ color: "var(--muted)" }}>
                   {monthShort(month.previousMonth)}, day {month.dayOfMonth}
                 </span>
                 <span
-                  className="font-mono text-[13px] font-medium tabular-nums"
+                  className="font-mono text-body font-medium tabular-nums"
                   style={{ color: "var(--muted)" }}
                 >
                   {formatMoney(month.previousSpentToSamePointMinor, currency)}
@@ -146,7 +162,7 @@ export function Dashboard() {
             </div>
           </div>
 
-          <p className="mt-3.5 text-[12px] leading-[1.45]" style={{ color: "var(--muted)" }}>
+          <p className="mt-3.5 text-meta leading-[1.45]" style={{ color: "var(--muted)" }}>
             {month.previousSpentToSamePointMinor === 0
               ? "No history from last month to compare against yet."
               : month.deltaMinor === 0
@@ -161,7 +177,7 @@ export function Dashboard() {
         <Card
           title="Last 30 days"
           action={
-            <span className="text-[11px]" style={{ color: "var(--faint)" }}>
+            <span className="text-caption" style={{ color: "var(--faint)" }}>
               {peak.totalMinor > 0
                 ? `Peak ${formatMoney(peak.totalMinor, currency)} · ${shortDate(peak.localDate)}`
                 : "No spend yet"}
@@ -173,7 +189,7 @@ export function Dashboard() {
               <span
                 key={point.localDate}
                 title={`${shortDate(point.localDate)} · ${formatMoney(point.totalMinor, currency)}`}
-                className="flex-1 rounded-[2px]"
+                className="flex-1 rounded-xs"
                 style={{
                   height: `${Math.max(4, point.ratio * 62)}px`,
                   background: point.isToday
@@ -186,7 +202,7 @@ export function Dashboard() {
             ))}
           </div>
           <div
-            className="mt-2.5 flex justify-between text-[10px] font-medium uppercase tracking-[0.06em]"
+            className="mt-2.5 flex justify-between text-eyebrow uppercase"
             style={{ color: "var(--faint)" }}
           >
             <span>{shortDate(trend[0]?.localDate ?? "")}</span>
@@ -198,7 +214,7 @@ export function Dashboard() {
         {/* Where it went */}
         <Card title="Where it went">
           {categories.length === 0 ? (
-            <p className="py-4 text-[13px]" style={{ color: "var(--faint)" }}>
+            <p className="py-4 text-body" style={{ color: "var(--faint)" }}>
               Nothing logged this month yet.
             </p>
           ) : (
@@ -216,20 +232,20 @@ export function Dashboard() {
                 {categories.map((slice) => (
                   <li key={slice.category.slug} className="flex items-center gap-2.5">
                     <span
-                      className="size-2.5 shrink-0 rounded-[3px]"
+                      className="size-2.5 shrink-0 rounded-xs"
                       style={{ background: slice.category.colorVar }}
                     />
-                    <span className="flex-1 text-[13px]" style={{ color: "var(--text)" }}>
+                    <span className="flex-1 text-body" style={{ color: "var(--text)" }}>
                       {slice.category.name}
                     </span>
                     <span
-                      className="font-mono text-[12px] tabular-nums"
+                      className="font-mono text-meta tabular-nums"
                       style={{ color: "var(--muted)" }}
                     >
                       {slice.percentLabel}
                     </span>
                     <span
-                      className="w-[62px] text-right font-mono text-[13px] font-medium tabular-nums"
+                      className="w-[62px] text-right font-mono text-body font-medium tabular-nums"
                       style={{ color: "var(--text)" }}
                     >
                       {formatMoney(slice.totalMinor, currency)}
@@ -241,16 +257,15 @@ export function Dashboard() {
           )}
         </Card>
 
-        {/* Heatmap. Capped: the cells are square, so in a full-width desktop
-            column each one inflates to ~95px and the calendar reads as a wall
-            of tiles rather than a density plot. */}
+        {/* Fill the card on mobile so the seven columns have balanced side
+            spacing. Keep the cap on desktop, where cells would grow too large. */}
         <Card title="Heavier days are darker">
-          <div className="max-w-[320px]">
+          <div className="w-full lg:max-w-[320px]">
           <div className="mb-1.5 grid grid-cols-7 gap-1.5">
             {["M", "T", "W", "T", "F", "S", "S"].map((day, i) => (
               <span
                 key={`${day}-${i}`}
-                className="text-center text-[10px] font-medium"
+                className="text-center text-caption font-medium"
                 style={{ color: "var(--faint)" }}
               >
                 {day}
@@ -275,7 +290,7 @@ export function Dashboard() {
           </div>
 
           <div className="mt-3.5 flex items-center gap-1.5">
-            <span className="mr-0.5 text-[11px]" style={{ color: "var(--faint)" }}>
+            <span className="mr-0.5 text-caption" style={{ color: "var(--faint)" }}>
               Light
             </span>
             {HEAT_COLORS.map((color, level) => (
@@ -288,7 +303,7 @@ export function Dashboard() {
                 }}
               />
             ))}
-            <span className="ml-0.5 text-[11px]" style={{ color: "var(--faint)" }}>
+            <span className="ml-0.5 text-caption" style={{ color: "var(--faint)" }}>
               Heavy
             </span>
           </div>
@@ -298,35 +313,35 @@ export function Dashboard() {
         {/* Top drivers */}
         <Card title="Top 3 spend drivers">
           {drivers.length === 0 ? (
-            <p className="py-4 text-[13px]" style={{ color: "var(--faint)" }}>
+            <p className="py-4 text-body" style={{ color: "var(--faint)" }}>
               Log a few things and the pattern shows up here.
             </p>
           ) : (
-            <ol className="flex flex-col gap-3.5">
+            <ol className="flex flex-col gap-3">
               {drivers.map((driver, index) => (
                 <li key={driver.name} className="flex items-baseline gap-3">
                   <span
-                    className="w-3.5 font-mono text-[13px] font-semibold"
+                    className="w-3.5 font-mono text-body font-semibold"
                     style={{ color: "var(--faint)" }}
                   >
                     {index + 1}
                   </span>
                   <span className="flex-1">
                     <span
-                      className="block text-[14px] font-medium leading-tight"
+                      className="block text-label font-medium leading-tight"
                       style={{ color: "var(--text)" }}
                     >
                       {driver.name}
                     </span>
                     <span
-                      className="mt-[3px] block text-[11px]"
+                      className="mt-1 block text-caption"
                       style={{ color: "var(--muted)" }}
                     >
                       {driver.detail}
                     </span>
                   </span>
                   <span
-                    className="font-mono text-[14px] font-medium tabular-nums"
+                    className="font-mono text-label font-medium tabular-nums"
                     style={{ color: "var(--text)" }}
                   >
                     {formatMoney(driver.totalMinor, currency)}
@@ -343,6 +358,7 @@ export function Dashboard() {
           <DashLink href="/budgets" icon="dashboard" label="Budgets" />
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -351,7 +367,7 @@ function DashLink({ href, icon, label }: { href: string; icon: string; label: st
   return (
     <Link
       href={href}
-      className="flex flex-1 items-center justify-center gap-2 rounded-card border py-3.5 text-[13px] font-medium"
+      className="flex flex-1 items-center justify-center gap-2 rounded-card border py-3.5 text-body font-medium"
       style={{ borderColor: "var(--line)", background: "var(--surf)", color: "var(--text)" }}
     >
       <Icon name={icon} size={16} strokeWidth={1.8} />

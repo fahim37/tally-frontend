@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Icon, SearchIcon } from "@/components/ui/Icon";
 import { useTally } from "@/lib/store/TallyProvider";
 import {
@@ -40,8 +41,28 @@ export function Insights() {
     setUnanswered(local === null && text.trim().length > 0);
   };
 
+  const hasAnything = state.expenses.some((e) => !e.deletedAt);
+
+  if (!hasAnything) {
+    return (
+      <div className="px-5 pt-6 pb-8">
+        <PageHeader title="Insights" />
+        {/* Every panel here is a comparison — this week against last, a
+            forecast from the pace so far, an outlier against its category's
+            own history. None of them mean anything without days behind them,
+            and a week summary reading "৳0 against ৳0" is worse than saying so. */}
+        <EmptyState
+          icon="warning"
+          title="Nothing to compare yet."
+          body="Once there are a few days logged, this reads back what changed week to week, where the month is heading, and anything that looks unusual for you."
+          action={{ href: "/", label: "Log something" }}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="px-5 pb-8 pt-6">
+    <div className="px-5 pt-6 pb-8">
       <PageHeader title="Insights" />
 
       {/* Weekly summary */}
@@ -51,8 +72,8 @@ export function Insights() {
             key={sentence}
             className={
               index === 0
-                ? "mb-3 font-display text-[17px] leading-[1.5] tracking-[-0.01em]"
-                : "mb-3 text-[15px] leading-[1.55] last:mb-0"
+                ? "mb-3 font-display text-subhead font-normal"
+                : "mb-3 text-label leading-[1.55] last:mb-0"
             }
             style={{ color: "var(--text)" }}
           >
@@ -73,18 +94,18 @@ export function Insights() {
           }}
         >
           <div className="mb-2.5 flex items-center gap-2">
-            <span style={{ color: "var(--amber)" }}>
+            <span style={{ color: "var(--amber-text)" }}>
               <Icon name="warning" size={15} strokeWidth={2} />
             </span>
             <span
-              className="text-[10px] font-semibold uppercase tracking-[0.12em]"
-              style={{ color: "var(--amber)" }}
+              className="text-eyebrow uppercase"
+              style={{ color: "var(--amber-text)" }}
             >
               Unusual
             </span>
           </div>
 
-          <p className="text-[14px] leading-[1.5]" style={{ color: "var(--text)" }}>
+          <p className="text-label" style={{ color: "var(--text)" }}>
             {formatMoney(anomaly.amountMinor, currency)} on {anomaly.name.toLowerCase()},{" "}
             {shortDate(anomaly.localDate)}. {anomaly.reason}
           </p>
@@ -95,13 +116,13 @@ export function Insights() {
       <Card className="mb-3" title="Month-end forecast">
         <div className="mb-3.5 flex items-baseline gap-2.5">
           <span
-            className="font-display text-[34px] font-semibold leading-none tracking-[-0.035em] tabular-nums"
-            style={{ color: forecast.isOver ? "var(--amber)" : "var(--teal)" }}
+            className="font-display text-display tabular-nums"
+            style={{ color: forecast.isOver ? "var(--amber-text)" : "var(--teal-text)" }}
           >
             {formatMoney(forecast.projectedMinor, currency)}
           </span>
           {forecast.limitMinor > 0 && (
-            <span className="text-[13px]" style={{ color: "var(--muted)" }}>
+            <span className="text-body" style={{ color: "var(--muted)" }}>
               of {formatMoney(forecast.limitMinor, currency)}
             </span>
           )}
@@ -112,11 +133,14 @@ export function Insights() {
             className="relative mb-2.5 h-2.5 rounded-pill"
             style={{ background: "var(--bg)" }}
           >
+            {/* scaleX rather than width: a width transition relayouts and
+                repaints the bar every frame. */}
             <div
-              className="absolute left-0 top-0 h-2.5 rounded-pill"
+              className="absolute top-0 left-0 h-2.5 w-full origin-left rounded-pill"
               style={{
-                width: `${Math.min(100, forecast.ratio * 100)}%`,
+                transform: `scaleX(${Math.min(1, forecast.ratio)})`,
                 background: forecast.isOver ? "var(--amber)" : "var(--teal)",
+                transition: "transform var(--dur-slow) var(--ease-out)",
               }}
             />
             {/* Where the month actually is right now, against the projection. */}
@@ -132,7 +156,7 @@ export function Insights() {
           </div>
         )}
 
-        <p className="text-[13px] leading-[1.45]" style={{ color: "var(--muted)" }}>
+        <p className="text-body leading-[1.45]" style={{ color: "var(--muted)" }}>
           {forecast.sentence}
         </p>
       </Card>
@@ -141,7 +165,7 @@ export function Insights() {
       <Card title="Ask about your money">
         <label
           htmlFor="ask-input"
-          className="mb-3 flex cursor-text items-center gap-2.5 rounded-[14px] border px-3.5 py-3"
+          className="mb-3 flex cursor-text items-center gap-2.5 rounded-card border px-3.5 py-3"
           style={{ background: "var(--bg)", borderColor: "var(--line)" }}
         >
           <span style={{ color: "var(--faint)" }}>
@@ -154,7 +178,7 @@ export function Insights() {
             onKeyDown={(event) => event.key === "Enter" && ask(question)}
             placeholder="How much on tea last 3 months?"
             aria-label="Ask about your money"
-            className="min-w-0 flex-1 bg-transparent text-[14px] outline-none"
+            className="min-w-0 flex-1 bg-transparent text-label outline-none"
             style={{ color: "var(--text)" }}
           />
           <button type="button" onClick={() => ask(question)} aria-label="Ask" className="tap-target px-1.5">
@@ -166,7 +190,7 @@ export function Insights() {
 
         {answer && (
           <p
-            className="mb-3 rounded-[13px] p-3.5 text-[14px] leading-[1.5]"
+            className="mb-3 rounded-card p-3.5 text-label"
             style={{ background: "var(--sky)", color: "var(--text)" }}
           >
             {answer}
@@ -175,7 +199,7 @@ export function Insights() {
 
         {unanswered && (
           <p
-            className="mb-3 rounded-[13px] p-3.5 text-[13px] leading-[1.5]"
+            className="mb-3 rounded-card p-3.5 text-body"
             style={{ background: "var(--bg)", color: "var(--muted)" }}
           >
             That one needs the AI service, which isn&apos;t connected yet. Questions like
@@ -190,7 +214,7 @@ export function Insights() {
               key={suggestion}
               type="button"
               onClick={() => ask(suggestion)}
-              className="tap-target rounded-pill px-3 py-2 text-[12px]"
+              className="tap-target rounded-pill px-3 py-2 text-meta"
               style={{ background: "var(--sky)", color: "var(--text)" }}
             >
               {suggestion}

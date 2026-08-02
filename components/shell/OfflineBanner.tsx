@@ -13,44 +13,69 @@ import { Icon } from "@/components/ui/Icon";
 export function OfflineBanner() {
   const { state, pendingCount, syncNow } = useTally();
   const offline = !state.online;
+  const shouldShow = offline || pendingCount > 0;
 
-  if (!offline && pendingCount === 0) return null;
-
+  // It used to return null outright, so the strip popped in and out and shoved
+  // the whole page down by its height with no transition — a jolt on a screen
+  // the user is probably mid-tap on.
+  //
+  // It stays mounted and collapses instead, via a 1fr → 0fr grid row, which is
+  // the one way to transition to and from an auto height without measuring it.
+  // Always rendering it is cheaper than the mount/unmount state it replaced:
+  // it's a handful of nodes, and it means no effect and no cascading render.
   return (
     <div
-      role="status"
-      className="mx-4 mt-2 flex items-center gap-3 rounded-[13px] border px-3.5 py-3"
+      className="grid"
+      aria-hidden={!shouldShow || undefined}
       style={{
-        background: "var(--surf)",
-        borderColor: "var(--line)",
-        borderLeft: `3px solid ${offline ? "var(--amber)" : "var(--teal)"}`,
+        gridTemplateRows: shouldShow ? "1fr" : "0fr",
+        opacity: shouldShow ? 1 : 0,
+        transition:
+          "grid-template-rows var(--dur-base) var(--ease-out), opacity var(--dur-fast) ease",
       }}
     >
-      <span style={{ color: offline ? "var(--amber)" : "var(--teal)" }}>
-        <Icon name={offline ? "offline" : "retry"} size={17} strokeWidth={1.9} />
-      </span>
-
-      <div className="flex-1">
-        <p className="text-[13px] font-medium leading-tight" style={{ color: "var(--text)" }}>
-          {offline ? "You're offline. Taps still count." : "Syncing your taps…"}
-        </p>
-        {pendingCount > 0 && (
-          <p className="mt-[3px] text-[11px] leading-tight" style={{ color: "var(--muted)" }}>
-            {pendingCount} waiting to sync
-          </p>
-        )}
-      </div>
-
-      {!offline && pendingCount > 0 && (
-        <button
-          type="button"
-          onClick={syncNow}
-          className="rounded-[10px] px-3 py-2 text-[12px] font-medium"
-          style={{ color: "var(--blue)" }}
+      <div className="overflow-hidden">
+        <div
+          role="status"
+          className="mx-5 mt-2 flex items-center gap-3 rounded-card border px-4 py-3"
+          style={{
+            background: "var(--surf)",
+            borderColor: "var(--line)",
+            borderLeft: `3px solid ${offline ? "var(--amber)" : "var(--teal)"}`,
+          }}
         >
-          Retry
-        </button>
-      )}
+          <span style={{ color: offline ? "var(--amber-text)" : "var(--teal-text)" }}>
+            <Icon
+              name={offline ? "offline" : "retry"}
+              size={19}
+              strokeWidth={1.9}
+              className={offline ? undefined : "animate-spin-slow"}
+            />
+          </span>
+
+          <div className="flex-1">
+            <p className="text-body font-medium leading-tight" style={{ color: "var(--text)" }}>
+              {offline ? "You're offline. Taps still count." : "Syncing your taps…"}
+            </p>
+            {pendingCount > 0 && (
+              <p className="mt-1 text-caption leading-tight" style={{ color: "var(--muted)" }}>
+                {pendingCount} waiting to sync
+              </p>
+            )}
+          </div>
+
+          {!offline && pendingCount > 0 && (
+            <button
+              type="button"
+              onClick={syncNow}
+              className="tap-target rounded-[10px] px-3 py-2 text-meta font-medium"
+              style={{ color: "var(--blue)" }}
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

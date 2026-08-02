@@ -118,7 +118,7 @@ export function ScanTab({ onClose }: ScanTabProps) {
     return (
       <div>
         <div
-          className="relative flex h-[240px] items-center justify-center overflow-hidden rounded-[16px]"
+          className="relative flex h-[240px] items-center justify-center overflow-hidden rounded-card"
           style={{ background: "#0B1220" }}
         >
           <div className="absolute inset-0" style={{ background: "linear-gradient(#151E31,#0B1220)" }} />
@@ -145,12 +145,12 @@ export function ScanTab({ onClose }: ScanTabProps) {
               />
             );
           })}
-          <p className="relative px-8 text-center text-[13px]" style={{ color: "#B7C6FF" }}>
+          <p className="relative px-8 text-center text-body" style={{ color: "#B7C6FF" }}>
             Point at the receipt total.
           </p>
         </div>
 
-        <p className="mt-4 text-center text-[13px] leading-[1.5]" style={{ color: "var(--muted)" }}>
+        <p className="mt-4 text-center text-body leading-[1.5]" style={{ color: "var(--muted)" }}>
           {state.online
             ? "Tally reads the amount and the shop name. You check it before anything is logged."
             : "You're offline — capture it now and type the lines in yourself."}
@@ -170,7 +170,7 @@ export function ScanTab({ onClose }: ScanTabProps) {
             type="button"
             onClick={() => fileInput.current?.click()}
             aria-label="Choose a photo"
-            className="flex size-11 items-center justify-center rounded-[13px] border"
+            className="flex size-11 items-center justify-center rounded-card border"
             style={{ borderColor: "var(--line)", color: "var(--muted)" }}
           >
             <Icon name="image" size={20} />
@@ -193,7 +193,7 @@ export function ScanTab({ onClose }: ScanTabProps) {
               setLines([blankLine()]);
             }}
             aria-label="Enter the lines by hand"
-            className="flex size-11 items-center justify-center rounded-[13px] border"
+            className="flex size-11 items-center justify-center rounded-card border"
             style={{ borderColor: "var(--line)", color: "var(--muted)" }}
           >
             <Icon name="edit" size={20} />
@@ -206,19 +206,20 @@ export function ScanTab({ onClose }: ScanTabProps) {
   // ── Reading ──────────────────────────────────────────────────────────────
   if (status === "reading") {
     return (
-      <div className="py-14 text-center">
+      <div className="py-14 text-center" aria-busy>
+        {/* The keyframe lives in globals.css now. Declaring it in a <style>
+            element inside the JSX re-parsed a stylesheet every time this
+            branch mounted, and put a global animation name outside the file
+            that owns the design tokens — so the reduced-motion rules couldn't
+            see it, and the spinner froze into a dead ring under this exact
+            message. `.animate-spin-slow` has a no-motion fallback. */}
         <div
-          className="mx-auto mb-5 size-10 rounded-pill border-2"
-          style={{
-            borderColor: "var(--line)",
-            borderTopColor: "var(--blue)",
-            animation: "spin 700ms linear infinite",
-          }}
+          className="animate-spin-slow mx-auto mb-5 size-10 rounded-pill border-2"
+          style={{ borderColor: "var(--line)", borderTopColor: "var(--blue)" }}
         />
-        <p className="text-[14px] font-medium" style={{ color: "var(--text)" }}>
+        <p className="text-label font-medium" style={{ color: "var(--text)" }}>
           Reading the receipt…
         </p>
-        <style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style>
       </div>
     );
   }
@@ -227,13 +228,13 @@ export function ScanTab({ onClose }: ScanTabProps) {
   if (status === "failed") {
     return (
       <div className="py-10 text-center">
-        <span style={{ color: "var(--amber)" }}>
+        <span style={{ color: "var(--amber-text)" }}>
           <Icon name="warning" size={26} strokeWidth={1.9} />
         </span>
-        <p className="mt-3 text-[15px] font-medium" style={{ color: "var(--text)" }}>
+        <p className="mt-3 text-label font-medium" style={{ color: "var(--text)" }}>
           Couldn&apos;t read that one
         </p>
-        <p className="mx-auto mt-2 max-w-[280px] text-[13px] leading-[1.5]" style={{ color: "var(--muted)" }}>
+        <p className="mx-auto mt-2 max-w-[280px] text-body leading-[1.5]" style={{ color: "var(--muted)" }}>
           Receipt reading needs the server, which isn&apos;t connected yet. You can type
           the lines in instead.
         </p>
@@ -242,7 +243,7 @@ export function ScanTab({ onClose }: ScanTabProps) {
           <button
             type="button"
             onClick={() => setStatus("idle")}
-            className="rounded-[12px] border px-4 py-3 text-[13px] font-medium"
+            className="rounded-card border px-4 py-3 text-body font-medium"
             style={{ borderColor: "var(--line)", color: "var(--text)" }}
           >
             Try again
@@ -253,7 +254,7 @@ export function ScanTab({ onClose }: ScanTabProps) {
               setStatus("review");
               setLines([blankLine()]);
             }}
-            className="rounded-[12px] px-4 py-3 text-[13px] font-semibold"
+            className="rounded-card px-4 py-3 text-body font-semibold"
             style={{ background: "var(--blue)", color: "#FFFFFF" }}
           >
             Type it in
@@ -271,12 +272,12 @@ export function ScanTab({ onClose }: ScanTabProps) {
         <img
           src={preview}
           alt="The receipt you captured"
-          className="mb-4 h-32 w-full rounded-[14px] object-cover"
+          className="mb-4 h-32 w-full rounded-card object-cover"
         />
       )}
 
       <label
-        className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.12em]"
+        className="mb-2 block text-eyebrow uppercase"
         style={{ color: "var(--muted)" }}
         htmlFor="scan-merchant"
       >
@@ -287,18 +288,18 @@ export function ScanTab({ onClose }: ScanTabProps) {
         value={merchant}
         onChange={(event) => setMerchant(event.target.value)}
         placeholder="Where was it?"
-        className="mb-5 w-full rounded-[13px] border px-3.5 py-3 text-[14px] outline-none"
+        className="mb-5 w-full rounded-card border px-3.5 py-3 text-label outline-none"
         style={{ background: "var(--bg)", borderColor: "var(--line)", color: "var(--text)" }}
       />
 
       <div className="mb-2.5 flex items-center justify-between">
         <span
-          className="text-[10px] font-semibold uppercase tracking-[0.12em]"
+          className="text-eyebrow uppercase"
           style={{ color: "var(--muted)" }}
         >
           Lines
         </span>
-        <span className="font-mono text-[12px] tabular-nums" style={{ color: "var(--text)" }}>
+        <span className="font-mono text-meta tabular-nums" style={{ color: "var(--text)" }}>
           {formatMoney(total, currency)}
         </span>
       </div>
@@ -307,7 +308,7 @@ export function ScanTab({ onClose }: ScanTabProps) {
         {lines.map((line) => (
           <div
             key={line.key}
-            className="flex items-center gap-2 rounded-[13px] border p-2.5"
+            className="flex items-center gap-2 rounded-card border p-2.5"
             style={{ background: "var(--bg)", borderColor: "var(--line)" }}
           >
             <input
@@ -315,7 +316,7 @@ export function ScanTab({ onClose }: ScanTabProps) {
               onChange={(event) => updateLine(line.key, { label: event.target.value })}
               placeholder="What was it?"
               aria-label="Item"
-              className="min-w-0 flex-1 bg-transparent text-[14px] outline-none"
+              className="min-w-0 flex-1 bg-transparent text-label outline-none"
               style={{ color: "var(--text)" }}
             />
             <input
@@ -324,7 +325,7 @@ export function ScanTab({ onClose }: ScanTabProps) {
               placeholder="0"
               inputMode="decimal"
               aria-label="Amount"
-              className="w-20 bg-transparent text-right font-mono text-[14px] tabular-nums outline-none"
+              className="w-20 bg-transparent text-right font-mono text-label tabular-nums outline-none"
               style={{ color: "var(--text)" }}
             />
             <button
@@ -342,7 +343,7 @@ export function ScanTab({ onClose }: ScanTabProps) {
       <button
         type="button"
         onClick={() => setLines((current) => [...current, blankLine()])}
-        className="mt-2.5 w-full rounded-[12px] border border-dashed py-3 text-[13px] font-medium"
+        className="mt-2.5 w-full rounded-card border border-dashed py-3 text-body font-medium"
         style={{ borderColor: "var(--line)", color: "var(--muted)" }}
       >
         Add a line
@@ -352,7 +353,7 @@ export function ScanTab({ onClose }: ScanTabProps) {
         type="button"
         onClick={commit}
         disabled={!total}
-        className="mt-4 w-full rounded-[14px] py-4 text-[15px] font-semibold disabled:opacity-40"
+        className="mt-4 w-full rounded-card py-4 text-label font-semibold disabled:opacity-40"
         style={{ background: "var(--blue)", color: "#FFFFFF" }}
       >
         Log {formatMoney(total, currency)}

@@ -67,10 +67,10 @@ export function RollingTotal({ totalMinor, currency }: RollingTotalProps) {
     <div
       role="img"
       aria-label={`Spent today ${formatMoney(totalMinor, currency)}`}
-      className="mt-3 flex items-baseline font-display text-[48px] font-semibold leading-none tracking-[-0.035em] tabular-nums"
+      className="mt-3 flex items-baseline font-display text-hero tabular-nums"
       style={{ color: "var(--blue)" }}
     >
-      <span aria-hidden="true" className="mr-0.5 text-[29px]">
+      <span aria-hidden="true" className="mr-0.5 text-title">
         {symbol}
       </span>
 

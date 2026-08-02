@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { RingState } from "@/lib/store/selectors";
 
-const RADIUS = 31;
-const CIRCUMFERENCE = 2 * Math.PI * RADIUS; // 194.8
+const SIZE = 84;
+const RADIUS = 36;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 /**
  * Today's spend against the daily allowance.
@@ -28,28 +29,40 @@ export function BudgetRing({ ring, pulseKey }: { ring: RingState; pulseKey: numb
   const color = ring.isOver ? "var(--amber)" : "var(--blue)";
   const offset = CIRCUMFERENCE * (1 - ring.ratio);
 
+  const centre = SIZE / 2;
+
+  /**
+   * Past 999% the figure stops being information and starts being a layout
+   * problem — four characters is what fits inside the ring.
+   */
+  const label = ring.rawRatio >= 10 ? "999%" : ring.percentLabel;
+
   return (
     <div
-      className="relative size-[74px] shrink-0"
+      className="relative shrink-0"
       style={{
+        width: SIZE,
+        height: SIZE,
         animation:
           phase === 0
             ? undefined
             : `${phase % 2 ? "ringA" : "ringB"} .42s cubic-bezier(.3,1.2,.4,1)`,
       }}
+      role="img"
+      aria-label={`${ring.percentLabel} of today's budget used`}
     >
-      <svg width="74" height="74" viewBox="0 0 74 74" aria-hidden="true">
+      <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} aria-hidden="true">
         <circle
-          cx="37"
-          cy="37"
+          cx={centre}
+          cy={centre}
           r={RADIUS}
           fill="none"
           stroke="var(--line)"
           strokeWidth="7"
         />
         <circle
-          cx="37"
-          cy="37"
+          cx={centre}
+          cy={centre}
           r={RADIUS}
           fill="none"
           stroke={color}
@@ -57,23 +70,21 @@ export function BudgetRing({ ring, pulseKey }: { ring: RingState; pulseKey: numb
           strokeLinecap="round"
           strokeDasharray={CIRCUMFERENCE}
           strokeDashoffset={offset}
-          transform="rotate(-90 37 37)"
-          style={{ transition: "stroke-dashoffset .45s cubic-bezier(.2,.85,.25,1)" }}
+          transform={`rotate(-90 ${centre} ${centre})`}
+          style={{ transition: "stroke-dashoffset var(--dur-slow) var(--ease-out)" }}
         />
       </svg>
 
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-px">
+      {/* Just the number. "100%" over "BUDGET" needed more width than the ring
+          has interior, so the percentage wrapped and spilled over the stroke —
+          and the word was redundant anyway, with the allowance spelled out in
+          full immediately to its left. */}
+      <div className="absolute inset-0 flex items-center justify-center">
         <span
-          className="font-mono text-[15px] font-semibold tabular-nums"
-          style={{ color: "var(--text)" }}
+          className="font-mono text-subhead tabular-nums"
+          style={{ color: ring.isOver ? "var(--amber-text)" : "var(--text)" }}
         >
-          {ring.percentLabel}
-        </span>
-        <span
-          className="text-[8px] font-medium uppercase tracking-[0.1em]"
-          style={{ color: "var(--muted)" }}
-        >
-          Budget
+          {label}
         </span>
       </div>
     </div>

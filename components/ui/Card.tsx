@@ -17,7 +17,7 @@ export function Card({ children, className = "", title, action }: CardProps) {
         <div className="mb-3.5 flex items-baseline justify-between gap-3">
           {title && (
             <h2
-              className="text-[10px] font-semibold uppercase tracking-[0.12em]"
+              className="text-eyebrow uppercase"
               style={{ color: "var(--muted)" }}
             >
               {title}
@@ -31,7 +31,15 @@ export function Card({ children, className = "", title, action }: CardProps) {
   );
 }
 
-/** A labelled bar — used for budgets, month comparisons and category limits. */
+/**
+ * A labelled bar — used for budgets, month comparisons and category limits.
+ *
+ * The fill is always full width and scaled with a transform. Animating `width`
+ * (which this did) relayouts and repaints the bar on every frame of the
+ * transition, and the Budgets and Dashboard screens run several bars at once —
+ * the textbook way to make a mid-range Android stutter. A transform is handed
+ * to the compositor and costs nothing per frame.
+ */
 export function ProgressBar({
   ratio,
   color = "var(--blue)",
@@ -43,17 +51,20 @@ export function ProgressBar({
   height?: number;
   track?: string;
 }) {
+  const clamped = Math.min(1, Math.max(0, ratio));
+
   return (
     <div
       className="w-full overflow-hidden rounded-pill"
       style={{ height, background: track }}
+      role="presentation"
     >
       <div
-        className="h-full rounded-pill"
+        className="h-full w-full origin-left rounded-pill"
         style={{
-          width: `${Math.min(100, Math.max(0, ratio * 100))}%`,
           background: color,
-          transition: "width .4s cubic-bezier(.2,.85,.25,1)",
+          transform: `scaleX(${clamped})`,
+          transition: "transform var(--dur-slow) var(--ease-out)",
         }}
       />
     </div>

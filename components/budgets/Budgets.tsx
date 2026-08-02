@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Card, ProgressBar } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Icon } from "@/components/ui/Icon";
 import { Sheet } from "@/components/ui/Sheet";
 import { useTally } from "@/lib/store/TallyProvider";
@@ -36,8 +37,44 @@ export function Budgets() {
     (category) => !budget.categoryLimits.some((l) => l.categorySlug === category.slug)
   );
 
+  // Unlike the other analytics screens, this one stays fully usable with no
+  // history — a budget is something you set, not something derived. Only the
+  // "no budget yet" case needs handling, and it needs a way in, not a chart.
+  if (limit <= 0) {
+    return (
+      <div className="px-5 pt-6 pb-8">
+        <PageHeader title="Budgets" />
+        <EmptyState
+          icon="dashboard"
+          title="No budget set."
+          body="Give the month a rough number and Tally works out what you can spend a day — and keeps recalculating it as the month goes."
+        >
+          <button
+            type="button"
+            onClick={() => setEditingOverall(true)}
+            className="mt-5 rounded-card px-6 py-3 text-body font-semibold transition-transform active:scale-[0.98]"
+            style={{ background: "var(--blue)", color: "#FFFFFF" }}
+          >
+            Set a monthly budget
+          </button>
+        </EmptyState>
+
+        <AmountSheet
+          open={editingOverall}
+          title={`${monthLabel(month)} budget`}
+          hint="A rough number is enough — the daily pace is worked out from it."
+          initial=""
+          onClose={() => setEditingOverall(false)}
+          onSave={(value) =>
+            dispatch({ type: "SET_BUDGET", month, overallLimitMinor: value })
+          }
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="px-5 pb-8 pt-6">
+    <div className="px-5 pt-6 pb-8">
       <PageHeader title="Budgets" />
 
       {/* Overall */}
@@ -48,7 +85,7 @@ export function Budgets() {
           <button
             type="button"
             onClick={() => setEditingOverall(true)}
-            className="tap-target px-1 text-[12px] font-medium"
+            className="tap-target px-1 text-meta font-medium"
             style={{ color: "var(--blue)" }}
           >
             Edit
@@ -57,13 +94,13 @@ export function Budgets() {
       >
         <div className="mb-3.5 flex items-baseline gap-2">
           <span
-            className="font-display text-[40px] font-semibold leading-none tracking-[-0.035em] tabular-nums"
+            className="font-display text-hero tabular-nums"
             style={{ color: "var(--text)" }}
           >
             {formatMoney(spent, currency)}
           </span>
           {limit > 0 && (
-            <span className="text-[14px]" style={{ color: "var(--muted)" }}>
+            <span className="text-label" style={{ color: "var(--muted)" }}>
               of {formatMoney(limit, currency)}
             </span>
           )}
@@ -76,7 +113,7 @@ export function Budgets() {
               height={12}
               color={spent > limit ? "var(--amber)" : "var(--blue)"}
             />
-            <div className="mt-2.5 flex justify-between text-[12px]" style={{ color: "var(--muted)" }}>
+            <div className="mt-2.5 flex justify-between text-meta" style={{ color: "var(--muted)" }}>
               <span>
                 <span
                   className="font-mono"
@@ -93,7 +130,7 @@ export function Budgets() {
           <button
             type="button"
             onClick={() => setEditingOverall(true)}
-            className="mt-2 w-full rounded-[12px] py-3.5 text-[14px] font-semibold"
+            className="mt-2 w-full rounded-card py-3.5 text-label font-semibold"
             style={{ background: "var(--blue)", color: "#FFFFFF" }}
           >
             Set a monthly budget
@@ -104,7 +141,7 @@ export function Budgets() {
       {/* Per category */}
       <Card className="mb-3" title="Per category">
         {rows.length === 0 ? (
-          <p className="text-[13px]" style={{ color: "var(--faint)" }}>
+          <p className="text-body" style={{ color: "var(--faint)" }}>
             No category limits yet.
           </p>
         ) : (
@@ -115,13 +152,13 @@ export function Budgets() {
                   <button
                     type="button"
                     onClick={() => setLimitFor(row.category.slug)}
-                    className="tap-target text-[14px] font-medium"
+                    className="tap-target text-label font-medium"
                     style={{ color: "var(--text)" }}
                   >
                     {row.category.name}
                   </button>
                   <span
-                    className="font-mono text-[13px] font-medium tabular-nums"
+                    className="font-mono text-body font-medium tabular-nums"
                     style={{ color: "var(--text)" }}
                   >
                     {formatMoney(row.spentMinor, currency)}{" "}
@@ -138,12 +175,12 @@ export function Budgets() {
                 />
 
                 {row.isOver ? (
-                  <p className="mt-1.5 text-[11px]" style={{ color: "var(--amber)" }}>
+                  <p className="mt-1.5 text-caption" style={{ color: "var(--amber-text)" }}>
                     {formatMoney(row.spentMinor - row.limitMinor, currency)} over the limit.
                   </p>
                 ) : (
                   row.projectedBreachDay !== null && (
-                    <p className="mt-1.5 text-[11px]" style={{ color: "var(--amber)" }}>
+                    <p className="mt-1.5 text-caption" style={{ color: "var(--amber-text)" }}>
                       At this pace you pass the limit on {row.projectedBreachDay}{" "}
                       {monthLabel(month)}.
                     </p>
@@ -158,7 +195,7 @@ export function Budgets() {
           <button
             type="button"
             onClick={() => setLimitFor(unbudgeted[0].slug)}
-            className="mt-4 w-full rounded-[12px] border border-dashed py-3.5 text-[13px] font-medium"
+            className="mt-4 w-full rounded-card border border-dashed py-3.5 text-body font-medium"
             style={{ borderColor: "var(--line)", color: "var(--muted)" }}
           >
             Add a category limit
@@ -176,26 +213,26 @@ export function Budgets() {
         return (
           <Card key={goal.id} className="mb-3">
             <div className="mb-3.5 flex items-center gap-2">
-              <span style={{ color: "var(--teal)" }}>
+              <span style={{ color: "var(--teal-text)" }}>
                 <Icon name="goal" size={15} strokeWidth={2} />
               </span>
               <span
-                className="text-[10px] font-semibold uppercase tracking-[0.12em]"
-                style={{ color: "var(--teal)" }}
+                className="text-eyebrow uppercase"
+                style={{ color: "var(--teal-text)" }}
               >
                 Goal
               </span>
             </div>
 
             <p
-              className="mb-1.5 font-display text-[18px] font-semibold leading-[1.25] tracking-[-0.015em]"
+              className="mb-1.5 font-display text-subhead"
               style={{ color: "var(--text)" }}
             >
               {goal.title}
             </p>
 
             {habit && goal.reductionPerDay ? (
-              <p className="mb-4 text-[13px] leading-[1.45]" style={{ color: "var(--muted)" }}>
+              <p className="mb-4 text-body leading-[1.45]" style={{ color: "var(--muted)" }}>
                 {goal.reductionPerDay} fewer a day puts{" "}
                 {formatMoney(
                   Math.round(habit.habit.unitAmountMinor * goal.reductionPerDay * 30),
@@ -204,19 +241,19 @@ export function Budgets() {
                 a month aside. The target is {formatMoney(goal.targetAmountMinor, currency)}.
               </p>
             ) : (
-              <p className="mb-4 text-[13px] leading-[1.45]" style={{ color: "var(--muted)" }}>
+              <p className="mb-4 text-body leading-[1.45]" style={{ color: "var(--muted)" }}>
                 {goal.note}
               </p>
             )}
 
             <div className="mb-2 flex items-baseline justify-between">
               <span
-                className="font-mono text-[13px] font-medium tabular-nums"
-                style={{ color: "var(--teal)" }}
+                className="font-mono text-body font-medium tabular-nums"
+                style={{ color: "var(--teal-text)" }}
               >
                 {formatMoney(goal.savedAmountMinor, currency)} saved
               </span>
-              <span className="text-[12px]" style={{ color: "var(--muted)" }}>
+              <span className="text-meta" style={{ color: "var(--muted)" }}>
                 {Math.round(ratio * 100)}%
               </span>
             </div>
@@ -229,7 +266,7 @@ export function Budgets() {
       {/* Recurring */}
       <Card title="Recurring">
         {state.recurring.length === 0 ? (
-          <p className="text-[13px]" style={{ color: "var(--faint)" }}>
+          <p className="text-body" style={{ color: "var(--faint)" }}>
             Nothing recurring yet.
           </p>
         ) : (
@@ -237,24 +274,24 @@ export function Budgets() {
             {state.recurring.map((rule) => (
               <li key={rule.id} className="flex items-center gap-3">
                 <span
-                  className="flex size-9 shrink-0 items-center justify-center rounded-[11px]"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-card"
                   style={{ background: "var(--bg)", color: "var(--muted)" }}
                 >
                   <Icon name="bill" size={17} strokeWidth={1.6} />
                 </span>
 
                 <span className="flex-1">
-                  <span className="block text-[14px] font-medium" style={{ color: "var(--text)" }}>
+                  <span className="block text-label font-medium" style={{ color: "var(--text)" }}>
                     {rule.name}
                   </span>
-                  <span className="block text-[11px]" style={{ color: "var(--muted)" }}>
+                  <span className="block text-caption" style={{ color: "var(--muted)" }}>
                     {rule.frequency}
                     {rule.dayOfMonth ? ` · day ${rule.dayOfMonth}` : ""} · auto-logs
                   </span>
                 </span>
 
                 <span
-                  className="font-mono text-[13px] font-medium tabular-nums"
+                  className="font-mono text-body font-medium tabular-nums"
                   style={{ color: rule.isActive ? "var(--text)" : "var(--faint)" }}
                 >
                   {formatMoney(rule.amountMinor, currency)}
@@ -328,11 +365,11 @@ function AmountSheet({
 
   return (
     <Sheet open onClose={onClose} label={title}>
-      <p className="mb-1.5 font-display text-[20px] font-semibold" style={{ color: "var(--text)" }}>
+      <p className="mb-1.5 font-display text-title" style={{ color: "var(--text)" }}>
         {title}
       </p>
       {hint && (
-        <p className="mb-5 text-[13px] leading-[1.45]" style={{ color: "var(--muted)" }}>
+        <p className="mb-5 text-body leading-[1.45]" style={{ color: "var(--muted)" }}>
           {hint}
         </p>
       )}
@@ -343,7 +380,7 @@ function AmountSheet({
         inputMode="decimal"
         autoFocus
         aria-label={title}
-        className="mb-5 w-full rounded-[13px] border px-3.5 py-4 font-mono text-[22px] tabular-nums outline-none"
+        className="mb-5 w-full rounded-card border px-3.5 py-4 font-mono text-title tabular-nums outline-none"
         style={{ background: "var(--bg)", borderColor: "var(--blue)", color: "var(--text)" }}
       />
 
@@ -351,7 +388,7 @@ function AmountSheet({
         type="button"
         onClick={() => onSave(minor)}
         disabled={minor <= 0}
-        className="w-full rounded-[14px] py-4 text-[15px] font-semibold disabled:opacity-40"
+        className="w-full rounded-card py-4 text-label font-semibold disabled:opacity-40"
         style={{ background: "var(--blue)", color: "#FFFFFF" }}
       >
         Save

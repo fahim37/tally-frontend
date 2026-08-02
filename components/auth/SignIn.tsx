@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { useTally } from "@/lib/store/TallyProvider";
+import { ApiError } from "@/lib/api";
+import { authenticate, googleSignInAvailable, type AuthMode } from "@/lib/auth";
 
 /**
  * Sign in — two fields, nothing else.
@@ -13,64 +15,162 @@ import { useTally } from "@/lib/store/TallyProvider";
  * gets a working default that onboarding then revises. That's what keeps this
  * one screen instead of three.
  *
- * Auth is local-only until the API's /auth routes exist; the submit handler is
- * the single place that changes when they do.
+ * Signing in and signing up share it too. They ask for exactly the same two
+ * things, and a separate "create account" screen would be the same form with a
+ * different heading — so it's a toggle, and the only thing that changes is
+ * which endpoint the submit hits.
  */
+
+/**
+ * Only ever redirect somewhere inside this app.
+ *
+ * `?next=` comes from the URL bar, so it is attacker-controlled. Passing it
+ * straight to `router.replace` is an open redirect, and a `javascript:` URL
+ * there is an XSS — the Next docs call this out specifically. A leading single
+ * slash (but not `//`, which is protocol-relative and leaves the origin) is
+ * the only shape that can't escape.
+ */
+const safeNext = (value: string | null): string | null => {
+  if (!value) return null;
+  if (!value.startsWith("/") || value.startsWith("//")) return null;
+  return value;
+};
+
 export function SignIn() {
   const { state, dispatch } = useTally();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
+  const [mode, setMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const formRef = useRef<HTMLFormElement>(null);
+  const isSignUp = mode === "signup";
+
   const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-  const canSubmit = emailLooksValid && password.length >= 8 && !busy;
+  const passwordLongEnough = password.length >= 8;
+
+  // Sign-in must not enforce the signup rule: an account made before the rule
+  // existed still has to be able to get in, and the server is the authority.
+  const canSubmit = emailLooksValid && (isSignUp ? passwordLongEnough : password.length > 0);
+
+  // Validation appears on blur, not on every keystroke — telling someone their
+  // email is invalid while they're still typing the domain is just noise.
+  const showEmailError = touched.email && email.length > 0 && !emailLooksValid;
+  const showPasswordError = touched.password && isSignUp && password.length > 0 && !passwordLongEnough;
+
+  const switchMode = (next: AuthMode) => {
+    setMode(next);
+    setError(null);
+    setFieldErrors({});
+  };
+
+  const reject = (message: string) => {
+    setError(message);
+
+    // Restart the shake imperatively rather than remounting the form with a
+    // changing `key`. A remount would drop focus mid-correction, and the
+    // animation has to replay even when the message is identical to last time
+    // — removing the class, forcing a reflow, then re-adding it is the only
+    // thing that reliably retriggers a CSS animation.
+    const form = formRef.current;
+    if (!form) return;
+    form.classList.remove("animate-shake");
+    void form.offsetWidth;
+    form.classList.add("animate-shake");
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setError(null);
+    if (busy) return;
 
-    if (!emailLooksValid) return setError("That doesn't look like an email address.");
-    if (password.length < 8) return setError("Use at least 8 characters.");
+    setError(null);
+    setFieldErrors({});
+    setTouched({ email: true, password: true });
+
+    if (!emailLooksValid) return reject("That doesn't look like an email address.");
+    if (isSignUp && !passwordLongEnough) return reject("Use at least 8 characters.");
+    if (!password) return reject("Enter your password.");
 
     setBusy(true);
-    // TODO: POST /auth/signup — falls through to local state until it exists.
-    dispatch({
-      type: "UPDATE_PROFILE",
-      patch: { email: email.trim().toLowerCase(), signedIn: true, authProvider: "email" },
-    });
-    router.replace(state.profile.onboardingCompleted ? "/" : "/onboarding");
+
+    try {
+      const user = await authenticate(mode, email, password);
+      dispatch({ type: "SIGN_IN", user });
+
+      const next = safeNext(searchParams.get("next"));
+      router.replace(user.onboarding.completed ? (next ?? "/") : "/onboarding");
+      // Deliberately no setBusy(false): the route is changing, and re-enabling
+      // the form mid-navigation invites a second submit.
+    } catch (caught) {
+      setBusy(false);
+
+      if (!(caught instanceof ApiError)) {
+        return reject("Can't reach Tally. Check your connection and try again.");
+      }
+
+      if (caught.fieldErrors?.length) {
+        setFieldErrors(
+          Object.fromEntries(caught.fieldErrors.map((f) => [f.field, f.message]))
+        );
+      }
+
+      // 409 is only reachable from signup, and the fix is a mode switch rather
+      // than a retype — so offer it with the address already filled in.
+      if (caught.status === 409) {
+        setMode("signin");
+        return reject("You already have an account with that email. Signed in instead?");
+      }
+      if (caught.status === 429) {
+        return reject("Too many attempts. Wait a few minutes and try again.");
+      }
+      if (caught.status >= 500) {
+        return reject("Tally's server is having trouble. Try again in a moment.");
+      }
+
+      reject(caught.message);
+    }
   };
 
-  const continueWithGoogle = () => {
-    // TODO: Google Identity Services → POST /auth/google with the ID token.
-    setError("Google sign-in needs the API, which isn't connected yet. Use an email for now.");
-  };
+  // A signed-in user should never be looking at this. AppShell owns the
+  // redirect; this is here so the form isn't briefly interactive first.
+  useEffect(() => {
+    if (state.profile.signedIn) router.replace("/");
+  }, [state.profile.signedIn, router]);
+
+  const fieldStyle = (invalid: boolean) => ({
+    background: "var(--bg)",
+    borderColor: invalid ? "var(--amber-text)" : "var(--line)",
+    color: "var(--text)",
+  });
 
   return (
-    <div className="flex min-h-dvh flex-col justify-center px-7 pb-16 pt-10">
+    <div className="flex min-h-dvh flex-col justify-center px-5 pt-10 pb-16">
       <span
-        className="mb-7 flex size-11 items-center justify-center rounded-[14px]"
+        className="animate-pop-in mb-8 flex size-12 items-center justify-center rounded-card"
         style={{ background: "var(--blue)", color: "#FFFFFF" }}
       >
-        <Icon name="logo" size={25} strokeWidth={2} />
+        <Icon name="logo" size={26} strokeWidth={2} />
       </span>
 
-      <h1
-        className="mb-2.5 font-display text-[32px] font-semibold leading-[1.1] tracking-[-0.035em]"
-        style={{ color: "var(--text)" }}
-      >
-        Sign in to Tally
+      <h1 className="mb-2.5 font-display text-display" style={{ color: "var(--text)" }}>
+        {isSignUp ? "Create your Tally" : "Sign in to Tally"}
       </h1>
-      <p className="mb-7 text-[15px] leading-[1.5]" style={{ color: "var(--muted)" }}>
-        Your tiles and history follow you to any phone.
+      <p className="mb-8 text-label" style={{ color: "var(--muted)" }}>
+        {isSignUp
+          ? "Two fields. Everything else you can change later."
+          : "Your tiles and history follow you to any phone."}
       </p>
 
-      <form onSubmit={submit} noValidate>
+      <form ref={formRef} onSubmit={submit} noValidate>
         <label
-          className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.12em]"
+          className="mb-2 block text-eyebrow uppercase"
           style={{ color: "var(--muted)" }}
           htmlFor="signin-email"
         >
@@ -81,50 +181,132 @@ export function SignIn() {
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          placeholder="rafi@example.com"
+          onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+          placeholder="you@example.com"
           autoComplete="email"
           inputMode="email"
-          className="mb-4 w-full rounded-[13px] border px-3.5 py-4 text-[15px] outline-none"
-          style={{ background: "var(--bg)", borderColor: "var(--line)", color: "var(--text)" }}
+          autoCapitalize="none"
+          spellCheck={false}
+          disabled={busy}
+          aria-invalid={showEmailError || Boolean(fieldErrors.email) || undefined}
+          aria-describedby={showEmailError || fieldErrors.email ? "signin-email-error" : undefined}
+          className="w-full rounded-card border px-4 py-4 text-label outline-none transition-colors disabled:opacity-60"
+          style={fieldStyle(showEmailError || Boolean(fieldErrors.email))}
         />
+        {(showEmailError || fieldErrors.email) && (
+          <p id="signin-email-error" className="mt-2 text-caption" style={{ color: "var(--amber-text)" }}>
+            {fieldErrors.email ?? "That doesn't look like an email address."}
+          </p>
+        )}
 
         <label
-          className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.12em]"
+          className="mt-5 mb-2 block text-eyebrow uppercase"
           style={{ color: "var(--muted)" }}
           htmlFor="signin-password"
         >
           Password
         </label>
-        <input
-          id="signin-password"
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          placeholder="At least 8 characters"
-          autoComplete="current-password"
-          className="mb-2 w-full rounded-[13px] border px-3.5 py-4 text-[15px] outline-none"
-          style={{ background: "var(--bg)", borderColor: "var(--line)", color: "var(--text)" }}
-        />
+        <div className="relative">
+          <input
+            id="signin-password"
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+            placeholder={isSignUp ? "At least 8 characters" : "Your password"}
+            // Getting this wrong makes a password manager save the old password
+            // over the new one, or offer nothing at all on sign-in.
+            autoComplete={isSignUp ? "new-password" : "current-password"}
+            disabled={busy}
+            aria-invalid={showPasswordError || Boolean(fieldErrors.password) || undefined}
+            aria-describedby={
+              showPasswordError || fieldErrors.password ? "signin-password-error" : undefined
+            }
+            className="w-full rounded-card border py-4 pr-14 pl-4 text-label outline-none transition-colors disabled:opacity-60"
+            style={fieldStyle(showPasswordError || Boolean(fieldErrors.password))}
+          />
+          {/* The icon set has no eye glyph, and pressing an ambiguous one to
+              reveal a password is a bad guess to ask someone to make. */}
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            className="absolute top-1/2 right-2 flex h-11 -translate-y-1/2 items-center rounded-[10px] px-3 text-caption font-semibold"
+            style={{ color: "var(--muted)" }}
+          >
+            {showPassword ? "Hide" : "Show"}
+          </button>
+        </div>
+        {(showPasswordError || fieldErrors.password) && (
+          <p id="signin-password-error" className="mt-2 text-caption" style={{ color: "var(--amber-text)" }}>
+            {fieldErrors.password ?? "Use at least 8 characters."}
+          </p>
+        )}
 
         {error && (
-          <p role="alert" className="mb-3 text-[13px] leading-[1.4]" style={{ color: "var(--amber)" }}>
+          <p
+            role="alert"
+            className="mt-4 rounded-card px-3.5 py-3 text-body"
+            style={{ background: "var(--bg)", color: "var(--amber-text)" }}
+          >
             {error}
           </p>
         )}
 
         <button
           type="submit"
-          disabled={!canSubmit}
-          className="mt-3 w-full rounded-[13px] py-4 text-[15px] font-semibold transition-opacity disabled:opacity-40"
+          disabled={!canSubmit || busy}
+          className="mt-6 flex w-full items-center justify-center gap-2.5 rounded-card py-4 text-label font-semibold transition-all duration-[--dur-fast] active:scale-[0.99] disabled:opacity-40"
           style={{ background: "var(--blue)", color: "#FFFFFF" }}
         >
-          Continue
+          {busy && (
+            <span
+              aria-hidden
+              className="animate-spin-slow size-4 rounded-full border-2 border-white/30"
+              style={{ borderTopColor: "#FFFFFF" }}
+            />
+          )}
+          {busy ? (isSignUp ? "Creating account…" : "Signing in…") : "Continue"}
         </button>
       </form>
 
-      <div className="my-5 flex items-center gap-3">
+      <p className="mt-6 text-center text-body" style={{ color: "var(--muted)" }}>
+        {isSignUp ? "Already have an account?" : "New to Tally?"}{" "}
+        <button
+          type="button"
+          onClick={() => switchMode(isSignUp ? "signin" : "signup")}
+          className="tap-target font-semibold"
+          style={{ color: "var(--blue)" }}
+        >
+          {isSignUp ? "Sign in" : "Create an account"}
+        </button>
+      </p>
+
+      {/* Rendered only when a client ID is actually configured. A button that
+          can't work is worse than no button — it used to be always visible and
+          always answered with an error. */}
+      {googleSignInAvailable() && <GoogleButton onError={reject} />}
+
+      <p className="mt-8 text-caption" style={{ color: "var(--faint)" }}>
+        {isSignUp
+          ? "Creating an account stores your tiles and history on Tally's server so they follow you to any phone."
+          : "Tally keeps working offline — anything you log syncs when you're back."}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Google Identity Services, loaded on demand.
+ *
+ * Split out so the script tag and its callback only exist when there is a
+ * client ID to use, rather than being wired up and then disabled.
+ */
+function GoogleButton({ onError }: { onError: (message: string) => void }) {
+  return (
+    <>
+      <div className="my-6 flex items-center gap-3">
         <span className="h-px flex-1" style={{ background: "var(--line)" }} />
-        <span className="text-[12px]" style={{ color: "var(--faint)" }}>
+        <span className="text-caption" style={{ color: "var(--faint)" }}>
           or
         </span>
         <span className="h-px flex-1" style={{ background: "var(--line)" }} />
@@ -132,11 +314,13 @@ export function SignIn() {
 
       <button
         type="button"
-        onClick={continueWithGoogle}
-        className="flex w-full items-center justify-center gap-2.5 rounded-[13px] border py-4 text-[15px] font-medium"
+        onClick={() =>
+          onError("Google sign-in isn't finished yet. Use an email address for now.")
+        }
+        className="flex w-full items-center justify-center gap-2.5 rounded-card border py-4 text-label font-medium transition-colors"
         style={{ borderColor: "var(--line)", color: "var(--text)" }}
       >
-        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+        <svg width="19" height="19" viewBox="0 0 18 18" aria-hidden="true">
           <path
             fill="#4285F4"
             d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.49h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.91c1.71-1.57 2.69-3.89 2.69-6.63Z"
@@ -153,12 +337,7 @@ export function SignIn() {
         </svg>
         Continue with Google
       </button>
-
-      <p className="mt-7 text-[12px] leading-[1.5]" style={{ color: "var(--faint)" }}>
-        Signing in stores your account on this device. Nothing is sent anywhere until the
-        Tally server is connected.
-      </p>
-    </div>
+    </>
   );
 }
 

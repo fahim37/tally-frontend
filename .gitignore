@@ -24,6 +24,11 @@
 .DS_Store
 *.pem
 
+# Raw Gemini output behind public/art. Kept locally so re-cutting the alpha or
+# repacking never costs another paid generation; the committed assets in
+# public/art are what the app actually ships.
+/scripts/.art-cache/
+
 # debug
 npm-debug.log*
 yarn-debug.log*

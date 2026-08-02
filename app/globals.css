@@ -1,9 +1,13 @@
 @import "tailwindcss";
 
 /* ───────────────────────────────────────────────────────────────────────────
-   Tally design tokens — taken verbatim from Tally.dc.html so the built app and
-   the design board resolve to the same values. Six colors, three faces, two
-   radii; everything is built from these and nothing else.
+   Tally design tokens.
+
+   Six colors, three faces, two radii — and, new here, ONE type scale and ONE
+   motion scale. Before this, every component picked its own font size out of
+   the air (8, 9, 10, 11, 12, 13, 14, 15, 19, 20, 26, 29, 48px were all in
+   circulation) because there was nothing to be consistent with. Nothing in the
+   app should hardcode a font size, a duration or an easing curve again.
 
    Light is the default. Dark applies via `.dark` on a wrapper (the design
    board's approach, kept so one screen can be previewed dark) and via
@@ -14,14 +18,28 @@
   --bg: #f4f5f7;
   --surf: #ffffff;
   --text: #0b1220;
-  --muted: #697386;
-  --faint: #98a2b3;
+
+  /* --muted was #697386 (4.38:1 on --bg) and --faint was #98a2b3 (2.36:1).
+     Both failed WCAG AA, and between them they carry nearly every label in the
+     app — at 10–12px, where a marginal ratio stops being text and becomes grey
+     noise. Darkened to clear 4.5:1 on --bg, which is the harder of the two
+     backgrounds they sit on. */
+  --muted: #555e70; /* 5.98:1 on --bg, 6.47:1 on --surf */
+  --faint: #656e80; /* 4.70:1 on --bg, 5.08:1 on --surf */
+
   --line: #e4e7ec;
   --blue: #1b4dff;
   --blue-deep: #0b32c7;
   --sky: #e6ecff;
   --amber: #f5a524;
   --teal: #0fa47f;
+
+  /* --amber and --teal are calibrated as FILLS — as text on --surf they are
+     2.04:1 and 3.16:1. The ring's "৳420 left / ৳120 over" figures are real
+     information, so text gets its own darker pair. Never use --amber/--teal
+     for a text color; never use these two for a fill. */
+  --amber-text: #96600a; /* 5.28:1 on --surf */
+  --teal-text: #097a60; /* 5.30:1 on --surf */
 
   /* Chart-only steps — the heatmap ramp and the category breakdown. */
   --blue-100: #e6ecff;
@@ -39,6 +57,28 @@
   --radius-pill: 99px;
 
   --scrim: rgba(11, 18, 32, 0.34);
+
+  /* ── Motion ──────────────────────────────────────────────────────────────
+     Durations are named for their job, not their length, so "make the drawer
+     snappier" is one edit here instead of forty inline `.3s` strings. */
+  --dur-instant: 90ms; /* press feedback — must beat the next frame */
+  --dur-fast: 160ms; /* colour/opacity state changes */
+  --dur-base: 240ms; /* the default: enters, exits, small moves */
+  --dur-slow: 380ms; /* the drawer, the ring sweep */
+  --dur-count: 520ms; /* the rolling total settling */
+
+  /* The curve vaul/shadcn use for its drawer. Heavily front-loaded, so the
+     sheet leaves the finger instantly and eases into place. */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  /* Soft-keyboard height, written by useKeyboardInset() from visualViewport.
+     0 whenever the keyboard is closed, on desktop, and during SSR. */
+  --kb: 0px;
+  /* iOS home-indicator inset, resolved once here so nothing has to repeat the
+     env() call — it used to be applied three times over on the same screen. */
+  --safe-b: env(safe-area-inset-bottom, 0px);
 }
 
 .dark,
@@ -46,14 +86,19 @@
   --bg: #0b1220;
   --surf: #141c2c;
   --text: #e8ebf2;
-  --muted: #93a0b8;
-  --faint: #6b7891;
+  --muted: #9aa7bf; /* 7.02:1 on --surf */
+  --faint: #8894ac; /* 5.58:1 on --surf — was #6b7891 at 3.83:1 */
   --line: #232f47;
   --blue: #6e8cff;
   --blue-deep: #8fa6ff;
   --sky: #182449;
   --amber: #f5a524;
   --teal: #2bc49b;
+
+  /* On the dark surface the fill colors already clear AA as text (8.35:1 and
+     7.69:1), so the text pair collapses back onto them. */
+  --amber-text: #f5a524;
+  --teal-text: #2bc49b;
 
   --lift: 0 10px 24px -12px rgba(0, 0, 0, 0.7);
   --lift-btn: 0 12px 22px -8px rgba(110, 140, 255, 0.5);
@@ -63,8 +108,8 @@
   --scrim: rgba(11, 18, 32, 0.4);
 }
 
-/* Expose the tokens to Tailwind v4 so `bg-surf`, `text-muted`, `rounded-tile`
-   and friends resolve without a config file. */
+/* Expose the tokens to Tailwind v4 so `bg-surf`, `text-muted`, `rounded-tile`,
+   `text-body` and friends resolve without a config file. */
 @theme inline {
   --color-bg: var(--bg);
   --color-surf: var(--surf);
@@ -77,6 +122,8 @@
   --color-sky: var(--sky);
   --color-amber: var(--amber);
   --color-teal: var(--teal);
+  --color-amber-text: var(--amber-text);
+  --color-teal-text: var(--teal-text);
   --color-blue-100: var(--blue-100);
   --color-blue-200: var(--blue-200);
   --color-blue-400: var(--blue-400);
@@ -87,6 +134,62 @@
   --font-sans: var(--font-geist), system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
 
+  /* ── Type scale ────────────────────────────────────────────────────────
+     Nine steps, each with its line-height and tracking baked in. Every size
+     that used to sit below 14px moved up; the floor is now 12px, and that
+     floor is reserved for the uppercase eyebrow, which is a label rather than
+     something you read. Use these — `text-body`, `text-eyebrow` — never
+     `text-[13px]`. */
+
+  /* 12px · uppercase section label ("SPENT TODAY", "RECENTLY USED"). Was 10px,
+     where uppercase strips the ascender/descender cues that carry small text. */
+  --text-eyebrow: 0.75rem;
+  --text-eyebrow--line-height: 1.1;
+  --text-eyebrow--letter-spacing: 0.1em;
+  --text-eyebrow--font-weight: 600;
+
+  /* 13px · footnotes and hints. The smallest sentence-case text allowed. */
+  --text-caption: 0.8125rem;
+  --text-caption--line-height: 1.45;
+
+  /* 14px · secondary metadata sitting under a title. */
+  --text-meta: 0.875rem;
+  --text-meta--line-height: 1.4;
+
+  /* 15px · default reading size for body copy and list rows. */
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.5;
+
+  /* 16px · row titles, input text, button labels. 16px is also the threshold
+     below which iOS Safari zooms the viewport on focus — every text input in
+     the app must be at least this size. */
+  --text-label: 1rem;
+  --text-label--line-height: 1.4;
+
+  /* 18px · a card's own heading. */
+  --text-subhead: 1.125rem;
+  --text-subhead--line-height: 1.35;
+  --text-subhead--font-weight: 600;
+
+  /* 21px · section heading inside a screen. */
+  --text-title: 1.3125rem;
+  --text-title--line-height: 1.25;
+  --text-title--letter-spacing: -0.015em;
+  --text-title--font-weight: 600;
+
+  /* 32px · the screen title on sign-in and onboarding. */
+  --text-display: 2rem;
+  --text-display--line-height: 1.12;
+  --text-display--letter-spacing: -0.032em;
+  --text-display--font-weight: 600;
+
+  /* 46px · the running total and the budget input — the two numbers the whole
+     app exists to show. */
+  --text-hero: 2.875rem;
+  --text-hero--line-height: 1;
+  --text-hero--letter-spacing: -0.04em;
+  --text-hero--font-weight: 600;
+
   --radius-card: 14px;
   --radius-tile: 20px;
   --radius-pill: 99px;
@@ -95,6 +198,10 @@
   --shadow-btn: var(--lift-btn);
   --shadow-phone: var(--lift-phone);
   --shadow-sheet: var(--lift-sheet);
+
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 }
 
 /* These MUST sit inside @layer base. Unlayered CSS beats anything in a cascade
@@ -118,10 +225,14 @@
     background: var(--bg);
     color: var(--text);
     font-family: var(--font-geist), system-ui, sans-serif;
+    font-size: var(--text-body);
     -webkit-font-smoothing: antialiased;
     text-wrap: pretty;
-    /* Keep content clear of the iOS home indicator. */
-    padding-bottom: env(safe-area-inset-bottom);
+    /* The iOS home-indicator inset is NOT applied here. It used to be, and the
+       bottom nav re-applied it inside that padding box while the toast and the
+       sheet each added it again — four stacked insets, leaving a ~34px band of
+       bare --bg under a nav bar that was supposed to be flush to the edge. The
+       bottom-most fixed element owns the inset now, and only it. */
   }
 
   a {
@@ -139,6 +250,10 @@
     background: none;
     cursor: pointer;
     padding: 0;
+    /* Kills the 300ms tap delay and the grey flash on Android Chrome. The Tap
+       Pad's whole promise is that a tap registers instantly. */
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   input,
@@ -146,20 +261,25 @@
   select {
     font: inherit;
     color: inherit;
+    /* Below 16px iOS Safari zooms the page on focus and never zooms back. */
+    font-size: max(16px, var(--text-label));
   }
 
   /* No padding utility is applied to the native selects anywhere, so give them
-     a usable height directly. */
+     a usable height directly — 44px, the same touch floor as everything else.
+     It was 34px. */
   select {
-    min-height: 34px;
+    min-height: 44px;
   }
 }
 
 /**
  * Extends a small control's touch target to 44px without changing its painted
- * size or the surrounding layout — the pill toggles and inline text buttons
- * are ~24px of ink, which looks right and is too small to hit reliably.
- * The pseudo-element is invisible and sits behind the label.
+ * size or the surrounding layout.
+ *
+ * The pseudo-element is invisible and sits BEHIND the label (z-index: -1, not
+ * 0). At z-index 0 it painted over the very label it was extending, which is
+ * why the pill toggles needed their own stacking fixes.
  */
 @layer components {
   .tap-target {
@@ -168,15 +288,31 @@
   .tap-target::after {
     content: "";
     position: absolute;
-    left: 0;
-    right: 0;
+    left: 50%;
     top: 50%;
-    min-height: 44px;
-    /* Narrow controls (the "4 / 5 / 6" pills) need width as well as height. */
-    min-width: 32px;
-    height: 100%;
-    transform: translateY(-50%);
-    z-index: 0;
+    /* Both axes reach the full 44px. The old rule floored width at 32px, so
+       narrow controls — the "4 / 5 / 6" pills this exists for — got a target
+       12px short on the axis they most needed it. */
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+    z-index: -1;
+  }
+
+  /**
+   * Long lists (History) skip layout and paint for off-screen sections. The
+   * intrinsic size keeps the scrollbar honest so the thumb doesn't jump as
+   * sections resolve.
+   */
+  .list-section {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 320px;
+  }
+
+  /** Promote a layer for the duration of a gesture, then release it. Left on
+   *  permanently, will-change costs memory and can make things slower. */
+  .compositing {
+    will-change: transform;
   }
 }
 
@@ -195,10 +331,27 @@
   }
 }
 
-/* Horizontal chip rails scroll without a visible bar. */
+/* Horizontal chip rails scroll without a visible bar, and fade at the edge so
+   a cut-off chip reads as "there is more" rather than as a clipping bug. */
 [data-scroll] {
   scrollbar-width: none;
   -ms-overflow-style: none;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 20px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 20px),
+    transparent 100%
+  );
 }
 [data-scroll]::-webkit-scrollbar {
   width: 0;
@@ -207,17 +360,75 @@
 }
 
 /* Tap tiles must not select-and-drag or raise the iOS callout on long-press —
-   long-press is the app's own "edit amount" gesture. */
+   long-press is the app's own "edit amount" gesture.
+
+   `touch-action: pan-y`, NOT `none`: the pad fills most of a phone screen, and
+   `none` meant a vertical swipe starting anywhere on it could not scroll the
+   page at all. pan-y hands vertical scrolling back to the browser while the
+   app keeps the tap and the long-press. */
 [data-tap] {
-  touch-action: none;
+  touch-action: pan-y;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
 }
 
+/* ── Generated artwork ─────────────────────────────────────────────────────
+   The wash behind the day's total, produced by scripts/generate-art.mjs.
+
+   It is the only generated asset that ships per-theme, because it is the only
+   one with text on top of it. The tile badges are a single set for both themes
+   by design — see components/tap/TileArt.tsx.
+
+   The blend modes are the point. Each wash was rendered on its theme's own
+   base (white, and #0B1220), and those bases are not the card's surface
+   colour, so painting one over the other flatly would visibly shift the card.
+   Multiply drops a white base out and keeps only the tint; screen drops a near
+   -black base out and keeps only the glow. Either way the card's own --surf
+   still decides what colour it is, and the wash only adds light.
+
+   Everything here is decorative. With public/art empty the card paints
+   normally — a missing file costs a gradient, not a layout. */
+.art-wash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("/art/hero-light.webp");
+  background-size: cover;
+  background-position: right top;
+  mix-blend-mode: multiply;
+  opacity: 0.55;
+
+  /* The eyebrow, the figure and the pace line all run down the left, so the
+     wash is faded out of that half rather than trusted to stay pale there.
+     Straight across the card at full strength it tinted the total's own
+     background and cost the muted label most of its contrast. */
+  -webkit-mask-image: radial-gradient(
+    120% 130% at 100% 0%,
+    #000 0%,
+    rgba(0, 0, 0, 0.45) 45%,
+    transparent 78%
+  );
+  mask-image: radial-gradient(
+    120% 130% at 100% 0%,
+    #000 0%,
+    rgba(0, 0, 0, 0.45) 45%,
+    transparent 78%
+  );
+}
+
+.dark .art-wash,
+:root[data-theme="dark"] .art-wash {
+  background-image: url("/art/hero-dark.webp");
+  mix-blend-mode: screen;
+  opacity: 0.7;
+}
+
 /* ── Motion ────────────────────────────────────────────────────────────────
-   The design's named animations, disabled wholesale under reduced motion. */
+   Every named animation in the app. Each enter has a matching exit — the old
+   set was enter-only, which is why every sheet vanished on a hard cut. */
+
 @keyframes tallyIn {
   from {
     opacity: 0;
@@ -262,10 +473,18 @@
 }
 @keyframes sheetUp {
   from {
-    transform: translateY(102%);
+    transform: translate3d(0, 100%, 0);
   }
   to {
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
+  }
+}
+@keyframes sheetDown {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 100%, 0);
   }
 }
 @keyframes fadeIn {
@@ -276,13 +495,181 @@
     opacity: 1;
   }
 }
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
 
+/* Screen content on route change — a short rise, not a slide, so it reads as
+   the page settling rather than as a carousel. */
+@keyframes screenIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* List rows and cards, staggered by index via --i. */
+@keyframes rowIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Confirmation badges and the toast's icon — overshoots, then settles. */
+@keyframes popIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes toastOut {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.97);
+  }
+}
+
+/* A form that was rejected. Small amplitude — this is a correction, not an
+   alarm. */
+@keyframes shake {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  20% {
+    transform: translate3d(-5px, 0, 0);
+  }
+  40% {
+    transform: translate3d(4px, 0, 0);
+  }
+  60% {
+    transform: translate3d(-3px, 0, 0);
+  }
+  80% {
+    transform: translate3d(2px, 0, 0);
+  }
+}
+
+/* Was declared inline inside ScanTab's JSX, which re-parsed a stylesheet on
+   every mount and hid the keyframe from this file's reduced-motion audit. */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Skeletons while the session is being restored. */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* A progress bar filling. Driven by scaleX so it composites — the bars used to
+   animate `width`, which relayouts every frame, on several bars at once. */
+@keyframes barGrow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.animate-screen-in {
+  animation: screenIn var(--dur-base) var(--ease-out) both;
+}
+.animate-row-in {
+  animation: rowIn var(--dur-base) var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 28ms);
+}
+.animate-pop-in {
+  animation: popIn var(--dur-base) var(--ease-spring) both;
+}
+.animate-shake {
+  animation: shake var(--dur-slow) var(--ease-out) both;
+}
+.animate-spin-slow {
+  animation: spin 700ms linear infinite;
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────────
+   The old rule was `animation: none !important; transition: none !important`
+   on every element. That is heavier than the preference asks for: it stripped
+   the colour and opacity transitions that are the only feedback most controls
+   in this app have, and it froze the receipt-scanner's spinner into a dead
+   ring under the words "Reading the receipt…", which reads as a hung request.
+
+   Reduced motion means don't MOVE things. Colour and opacity still change —
+   just instantly enough not to register as motion. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation: none !important;
-    transition: none !important;
+    /* Movement is removed... */
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
+  }
+
+  /* ...but state changes stay visible, capped short enough to read as instant. */
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+
+  /* The one indeterminate-progress indicator in the app needs SOME signal that
+     work is happening. A slow opacity pulse carries no motion vector. */
+  .animate-spin-slow {
+    animation: reducedPulse 1.4s ease-in-out infinite !important;
+  }
+}
+
+@keyframes reducedPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
   }
 }

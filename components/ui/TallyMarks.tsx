@@ -10,6 +10,8 @@ interface TallyMarksProps {
   height?: number;
   /** Animate the newest group in. Off for static lists. */
   animate?: boolean;
+  /** Allow groups to continue on a second line in narrow tile layouts. */
+  wrap?: boolean;
   className?: string;
 }
 
@@ -25,6 +27,7 @@ export function TallyMarks({
   strikeAt = 5,
   height = 13,
   animate = false,
+  wrap = false,
   className,
 }: TallyMarksProps) {
   if (count <= 0) return null;
@@ -36,7 +39,14 @@ export function TallyMarks({
   return (
     <span
       className={className}
-      style={{ display: "inline-flex", gap: 5, alignItems: "center" }}
+      style={{
+        display: "inline-flex",
+        width: wrap ? "100%" : undefined,
+        flexWrap: wrap ? "wrap" : undefined,
+        columnGap: wrap ? 4 : 5,
+        rowGap: wrap ? 2 : undefined,
+        alignItems: "center",
+      }}
       role="img"
       aria-label={`${count} logged`}
     >

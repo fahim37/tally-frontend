@@ -14,7 +14,7 @@ import {
   type LocalDate,
   type LocalMonth,
 } from "../date";
-import type { LocalCategory, LocalExpense, LocalHabit, TallyState } from "./state";
+import type { LocalCategory, LocalExpense, LocalHabit, TallyState, TileEntry } from "./state";
 
 /**
  * Derived views over the store. Kept as pure functions rather than stored
@@ -97,43 +97,106 @@ export const ringState = (state: TallyState): RingState => {
 
 // ── Tiles ──────────────────────────────────────────────────────────────────
 
+/** The "anything else" category. Its tile always sorts to the end of the pad. */
+export const CATCH_ALL_SLUG = "other";
+
 export interface PadTile {
   id: string;
   name: string;
   iconKey: string;
   categorySlug: string;
   amountMinor: number;
+  sortIndex: number;
   presetAmountsMinor: number[];
+  /** "instant" logs on tap; "prompt" asks how much first. */
+  entry: TileEntry;
   todayCount: number;
+  /** What this tile has cost today — the only honest figure to show on a
+   *  prompt tile, whose per-entry amount is different every time. */
+  todayTotalMinor: number;
   usageCount: number;
 }
 
 /**
- * Tiles in pad order: most-used first, since the brief asks them to reorder by
- * frequency. Ties fall back to the seeded order so the grid doesn't shuffle
- * arbitrarily on a fresh account.
+ * Today's quantity per tile, in one pass.
+ *
+ * `padTiles` used to call `todayCountFor` once per tile, and each of those
+ * called `live()`, which allocates a filtered copy of the entire expense
+ * array. Twelve tiles against a year of history meant twelve full scans and
+ * twelve discarded arrays — per call, and `padTiles` is called three to five
+ * times on every tap.
  */
-export const padTiles = (state: TallyState): PadTile[] =>
-  state.tiles
-    .filter((t) => !t.isArchived)
-    .map((t) => ({
-      id: t.id,
-      name: t.name,
-      iconKey: t.iconKey,
-      categorySlug: t.categorySlug,
-      amountMinor: t.defaultAmountMinor,
-      presetAmountsMinor: t.presetAmountsMinor,
-      todayCount: todayCountFor(state, t.id),
-      usageCount: t.usageCount,
-    }))
-    .sort((a, b) => b.usageCount - a.usageCount || a.name.localeCompare(b.name));
+export interface TodayTally {
+  count: number;
+  totalMinor: number;
+}
 
-/** The "Recently used" chip rail — today's tiles, busiest first. */
-export const recentTiles = (state: TallyState, limit = 4): PadTile[] =>
-  padTiles(state)
-    .filter((t) => t.todayCount > 0)
-    .sort((a, b) => b.todayCount - a.todayCount)
-    .slice(0, limit);
+export const todayCounts = (state: TallyState): Map<string, TodayTally> => {
+  const today = todayLocalDate();
+  const counts = new Map<string, TodayTally>();
+
+  for (const expense of state.expenses) {
+    if (expense.deletedAt || expense.localDate !== today || !expense.tileId) continue;
+    const entry = counts.get(expense.tileId);
+    if (entry) {
+      entry.count += expense.quantity;
+      entry.totalMinor += expense.totalAmountMinor;
+    } else {
+      counts.set(expense.tileId, {
+        count: expense.quantity,
+        totalMinor: expense.totalAmountMinor,
+      });
+    }
+  }
+
+  return counts;
+};
+
+/**
+ * Tiles in pad order: most-used first, since the brief asks them to reorder by
+ * frequency. Ties fall back to the starting order so the grid doesn't shuffle
+ * arbitrarily on a fresh account.
+ *
+ * `counts` is optional so callers that already built the map (the home screen
+ * builds it once for the pad, the rail and the ring) can pass it through
+ * instead of paying for it again.
+ */
+export const padTiles = (state: TallyState, counts?: Map<string, TodayTally>): PadTile[] => {
+  const today = counts ?? todayCounts(state);
+
+  return state.tiles
+    .filter((t) => !t.isArchived)
+    .map((t) => {
+      const tally = today.get(t.id);
+      return {
+        id: t.id,
+        name: t.name,
+        iconKey: t.iconKey,
+        categorySlug: t.categorySlug,
+        amountMinor: t.defaultAmountMinor,
+        sortIndex: t.sortIndex,
+        presetAmountsMinor: t.presetAmountsMinor,
+        entry: t.entry,
+        todayCount: tally?.count ?? 0,
+        todayTotalMinor: tally?.totalMinor ?? 0,
+        usageCount: t.usageCount,
+      };
+    })
+    .sort((a, b) => {
+      // "Extras" is the leftover bucket — whatever didn't fit the other tiles.
+      // It belongs at the end of the pad no matter how often it gets used,
+      // because reading past it to reach a real category is backwards.
+      const aLast = a.categorySlug === CATCH_ALL_SLUG ? 1 : 0;
+      const bLast = b.categorySlug === CATCH_ALL_SLUG ? 1 : 0;
+      if (aLast !== bLast) return aLast - bLast;
+
+      // Then by frequency, as the brief asks. Ties fall back to the tile's own
+      // order rather than alphabetically, so a fresh pad reads in the order it
+      // was designed in (Cigarette, Food, Transport) instead of being
+      // reshuffled into an alphabet nobody chose.
+      return b.usageCount - a.usageCount || a.sortIndex - b.sortIndex;
+    });
+};
 
 // ── History ────────────────────────────────────────────────────────────────
 
@@ -365,6 +428,173 @@ export const topDrivers = (state: TallyState, limit = 3): SpendDriver[] => {
     }));
 };
 
+// ── Smoking ────────────────────────────────────────────────────────────────
+
+/**
+ * The category the reduction features track. Everything below keys off the
+ * category rather than a specific tile, so a second tile ("Pack of 20") counts
+ * toward the same day without any extra wiring.
+ */
+export const SMOKING_SLUG = "cigarettes";
+
+export interface SmokingDay {
+  localDate: LocalDate;
+  count: number;
+  /** Null before a target is set — an unmet target and no target at all are
+   *  different things and must not colour the same. */
+  underTarget: boolean | null;
+}
+
+export interface SmokingStats {
+  /** False when nothing has ever been logged in this category. */
+  isTracked: boolean;
+  todayCount: number;
+  targetDailyCount: number | null;
+  /** Average per day over the trailing window, across logged days only. */
+  averageDailyCount: number;
+  /** The same average for the window before it — the honest trend. */
+  previousAverageDailyCount: number;
+  /** Negative means smoking less. Null when there isn't enough history yet. */
+  changePercent: number | null;
+  /** Consecutive days up to yesterday at or under target. */
+  streak: number;
+  bestStreak: number;
+  /** Most recent first — the 14-day strip on the home card. */
+  recentDays: SmokingDay[];
+  totalLogged: number;
+  smokeFreeDays: number;
+}
+
+/**
+ * Everything the reduction features need, from a per-day count map.
+ *
+ * Deliberately all *observed* numbers — what was actually logged, on what
+ * days, against a target the user chose. There is no "you would save ৳X a
+ * year if you cut down" figure anywhere here: that multiplies a guess by 365
+ * to produce something shaped like a fact, and measures a year that hasn't
+ * happened instead of the day that has. Days under target either happened or
+ * they didn't.
+ */
+const reductionStats = (
+  counts: Map<LocalDate, number>,
+  target: number | null,
+  windowDays: number
+): SmokingStats => {
+  const today = todayLocalDate();
+  const window = lastNLocalDates(windowDays);
+  const previousWindow = lastNLocalDates(windowDays * 2).slice(0, windowDays);
+
+  // Averages run over days that were actually logged. Including untracked days
+  // as zeroes would show a fake improvement every time someone forgets to log.
+  const averageOver = (dates: LocalDate[]) => {
+    const logged = dates.map((d) => counts.get(d)).filter((n): n is number => n !== undefined);
+    if (!logged.length) return 0;
+    return logged.reduce((sum, n) => sum + n, 0) / logged.length;
+  };
+
+  const average = averageOver(window);
+  const previousAverage = averageOver(previousWindow);
+
+  const changePercent =
+    previousAverage > 0 && average > 0
+      ? Math.round(((average - previousAverage) / previousAverage) * 100)
+      : null;
+
+  // Streaks count back from yesterday: today isn't over, and a streak that can
+  // still break tonight isn't one yet.
+  let streak = 0;
+  if (target !== null) {
+    let cursor = addDays(today, -1);
+    while (counts.has(cursor) && (counts.get(cursor) ?? 0) <= target) {
+      streak += 1;
+      cursor = addDays(cursor, -1);
+    }
+  }
+
+  let bestStreak = 0;
+  if (target !== null && counts.size) {
+    const dates = [...counts.keys()].sort();
+    let run = 0;
+    let previous: LocalDate | null = null;
+
+    for (const date of dates) {
+      const under = (counts.get(date) ?? 0) <= target;
+      // A gap in logging breaks the run rather than extending it across days
+      // we know nothing about.
+      const contiguous = previous !== null && addDays(previous, 1) === date;
+
+      if (!under) run = 0;
+      else run = contiguous ? run + 1 : 1;
+
+      bestStreak = Math.max(bestStreak, run);
+      previous = date;
+    }
+  }
+
+  const recentDays: SmokingDay[] = window.map((localDate) => {
+    const logged = counts.get(localDate);
+    return {
+      localDate,
+      count: logged ?? 0,
+      underTarget: target === null || logged === undefined ? null : logged <= target,
+    };
+  });
+
+  return {
+    isTracked: counts.size > 0,
+    todayCount: counts.get(today) ?? 0,
+    targetDailyCount: target,
+    averageDailyCount: average,
+    previousAverageDailyCount: previousAverage,
+    changePercent,
+    streak,
+    bestStreak,
+    recentDays,
+    totalLogged: [...counts.values()].reduce((sum, n) => sum + n, 0),
+    smokeFreeDays: [...counts.values()].filter((n) => n === 0).length,
+  };
+};
+
+/** Per-day totals for whatever subset of expenses `matches` accepts. */
+const dailyCounts = (
+  state: TallyState,
+  matches: (expense: LocalExpense) => boolean
+): Map<LocalDate, number> => {
+  const counts = new Map<LocalDate, number>();
+  for (const expense of live(state.expenses)) {
+    if (!matches(expense)) continue;
+    counts.set(expense.localDate, (counts.get(expense.localDate) ?? 0) + expense.quantity);
+  }
+  return counts;
+};
+
+/**
+ * Smoking, tracked by category rather than by tile — so a second tile ("Pack
+ * of 20") counts toward the same day without any extra wiring.
+ */
+export const smokingStats = (state: TallyState, windowDays = 14): SmokingStats => {
+  const counts = dailyCounts(state, (e) => e.categorySlug === SMOKING_SLUG);
+
+  const habit = state.habits.find((h) => {
+    const tile = state.tiles.find((t) => t.id === h.tileId);
+    return tile?.categorySlug === SMOKING_SLUG;
+  });
+
+  return reductionStats(counts, habit?.targetDailyCount ?? null, windowDays);
+};
+
+/** The same picture for any tracked habit. */
+export const habitProgress = (
+  state: TallyState,
+  habit: LocalHabit,
+  windowDays = 14
+): SmokingStats =>
+  reductionStats(
+    dailyCounts(state, (e) => e.tileId === habit.tileId),
+    habit.targetDailyCount,
+    windowDays
+  );
+
 // ── Habits ─────────────────────────────────────────────────────────────────
 
 export interface HabitView {
@@ -510,6 +740,93 @@ export const categoryBudgetRows = (state: TallyState): CategoryBudgetRow[] => {
     })
     .filter((row): row is CategoryBudgetRow => row !== null)
     .sort((a, b) => b.ratio - a.ratio);
+};
+
+export interface SafeToSpend {
+  /** What's left of the month's budget. */
+  remainingMinor: number;
+  daysLeft: number;
+  /** Remaining budget ÷ days left — the pace that actually finishes the month. */
+  perDayMinor: number;
+  /** The flat allowance the budget started at, for comparison. */
+  originalPerDayMinor: number;
+  hasBudget: boolean;
+  isBehind: boolean;
+  /** True once the month's budget is already gone. */
+  isBlown: boolean;
+}
+
+/**
+ * "What can I spend a day from here?"
+ *
+ * The flat daily allowance (budget ÷ days in month) is the number you plan
+ * with, but it's the wrong number from the 12th onward, because it can't see
+ * what you've already done. Overspend early and it keeps cheerfully quoting a
+ * figure that guarantees you finish over.
+ *
+ * This is the one that recovers: it divides what's *left* by the days that are
+ * *left*, so it tightens when you're behind and loosens when you're under. It
+ * is the honest answer to "how do I get through the month on what I have."
+ */
+export const safeToSpend = (state: TallyState): SafeToSpend => {
+  const month = currentLocalMonth();
+  const budget = budgetFor(state, month);
+  const total = daysInMonth(month);
+  const elapsed = dayOfMonth(todayLocalDate());
+
+  // Today is still spendable, so it counts as one of the days remaining.
+  const daysLeft = Math.max(1, total - elapsed + 1);
+
+  const spent = sumMinor(live(state.expenses).filter((e) => e.localMonth === month));
+  const limit = budget.overallLimitMinor;
+  const remaining = limit - spent;
+
+  const perDay = limit > 0 ? Math.max(0, Math.round(remaining / daysLeft / 100) * 100) : 0;
+  const originalPerDay = limit > 0 ? Math.round(limit / total / 100) * 100 : 0;
+
+  return {
+    remainingMinor: remaining,
+    daysLeft,
+    perDayMinor: perDay,
+    originalPerDayMinor: originalPerDay,
+    hasBudget: limit > 0,
+    isBehind: limit > 0 && perDay < originalPerDay,
+    isBlown: limit > 0 && remaining <= 0,
+  };
+};
+
+export interface DayStat {
+  localDate: LocalDate;
+  totalMinor: number;
+}
+
+/** The heaviest day in a window, and the average, so one can be read against
+ *  the other. Used for "you spent more in one day than…" observations. */
+export const dayExtremes = (state: TallyState, days = 30) => {
+  const dates = lastNLocalDates(days);
+  const inWindow = new Set(dates);
+
+  const totals = new Map<LocalDate, number>();
+  for (const row of live(state.expenses)) {
+    if (!inWindow.has(row.localDate)) continue;
+    totals.set(row.localDate, (totals.get(row.localDate) ?? 0) + row.totalAmountMinor);
+  }
+
+  const logged: DayStat[] = [...totals.entries()]
+    .map(([localDate, totalMinor]) => ({ localDate, totalMinor }))
+    .filter((d) => d.totalMinor > 0)
+    .sort((a, b) => b.totalMinor - a.totalMinor);
+
+  const sum = logged.reduce((n, d) => n + d.totalMinor, 0);
+
+  return {
+    busiest: logged[0] ?? null,
+    quietest: logged[logged.length - 1] ?? null,
+    // Averaged over days actually logged, not the whole window — a week of
+    // untracked days would otherwise halve the "typical day" figure.
+    averageMinor: logged.length ? Math.round(sum / logged.length) : 0,
+    loggedDays: logged.length,
+  };
 };
 
 /** Straight-line month-end projection from the pace so far. */
