@@ -87,9 +87,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div
         className={`mx-auto flex w-full flex-1 flex-col ${wide ? "max-w-none" : "max-w-[520px]"}`}
       >
-        <div className="mx-auto w-full max-w-[520px]">
-          <OfflineBanner />
-        </div>
+        <OfflineBanner />
         {/* The nav is sticky, so it pins over the page while scrolling and only
             settles into flow at the very bottom. Without this reserve, the last
             control on a long screen sits under it mid-scroll and can't be hit —

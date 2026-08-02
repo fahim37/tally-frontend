@@ -14,13 +14,30 @@ import { createInitialState, type TallyState } from "./state";
 import {
   clearState,
   flushState,
+  loadAccountSyncFingerprints,
   loadState,
   markFullResyncComplete,
   needsFullResync,
+  saveAccountSyncFingerprints,
   saveState,
 } from "./persistence";
-import { fetchExpenses, flushExpenses, isOnline } from "./sync";
+import {
+  ACCOUNT_SECTION_NAMES,
+  fetchAccountState,
+  fetchExpenses,
+  fingerprintAccountSections,
+  fingerprintExpenseForSync,
+  flushAccountSections,
+  flushExpenses,
+  isOnline,
+  toAccountSections,
+} from "./sync";
 import { fetchSession, hasSession, signOut as revokeSession } from "../auth";
+import type { AccountSections } from "./state";
+
+const DEFAULT_ACCOUNT_FINGERPRINTS = fingerprintAccountSections(
+  toAccountSections(createInitialState())
+);
 
 interface TallyContextValue {
   state: TallyState;
@@ -61,7 +78,11 @@ export function TallyProvider({ children }: { children: React.ReactNode }) {
   // immediately after.
   const [state, dispatch] = useReducer(reducer, undefined, createInitialState);
   const syncing = useRef(false);
+  const accountSyncing = useRef(false);
+  const accountReadyUser = useRef<string | null>(null);
   const pulling = useRef(false);
+  const syncAccountNowRef = useRef<() => void>(() => undefined);
+  const syncNowRef = useRef<() => void>(() => undefined);
   const hydrated = state.hydrated;
 
   // ── Hydrate ──────────────────────────────────────────────────────────────
@@ -167,6 +188,19 @@ export function TallyProvider({ children }: { children: React.ReactNode }) {
     () => state.expenses.filter((e) => e.pendingSync),
     [state.expenses]
   );
+  const pendingFingerprint = useMemo(
+    () => pending.map(fingerprintExpenseForSync).join("\u001f"),
+    [pending]
+  );
+
+  const accountSections = useMemo(() => toAccountSections(state), [state]);
+  const accountFingerprints = useMemo(
+    () => fingerprintAccountSections(accountSections),
+    [accountSections]
+  );
+  const accountFingerprintKey = ACCOUNT_SECTION_NAMES.map(
+    (name) => accountFingerprints[name]
+  ).join("\u001f");
 
   // ── Drain the queue ──────────────────────────────────────────────────────
   // The queue is mirrored into a ref so `syncNow` can stay referentially
@@ -177,48 +211,211 @@ export function TallyProvider({ children }: { children: React.ReactNode }) {
   // thrown away before it ever commits.
   const pendingRef = useRef(pending);
   const userIdRef = useRef(state.profile.userId);
+  const accountSectionsRef = useRef(accountSections);
+  const accountFingerprintsRef = useRef(accountFingerprints);
   useEffect(() => {
     pendingRef.current = pending;
     userIdRef.current = state.profile.userId;
-  }, [pending, state.profile.userId]);
+    accountSectionsRef.current = accountSections;
+    accountFingerprintsRef.current = accountFingerprints;
+
+    if (accountReadyUser.current && accountReadyUser.current !== state.profile.userId) {
+      accountReadyUser.current = null;
+    }
+  }, [pending, state.profile.userId, accountSections, accountFingerprints]);
+
+  const syncAccountNow = useCallback(async () => {
+    const userId = userIdRef.current;
+    if (
+      !userId ||
+      accountReadyUser.current !== userId ||
+      accountSyncing.current ||
+      !isOnline() ||
+      !hasSession()
+    ) {
+      return;
+    }
+
+    const baseline = loadAccountSyncFingerprints(userId);
+    const currentFingerprints = accountFingerprintsRef.current;
+    const dirtyNames = ACCOUNT_SECTION_NAMES.filter(
+      (name) => currentFingerprints[name] !== baseline[name]
+    );
+    if (!dirtyNames.length) return;
+
+    const currentSections = accountSectionsRef.current;
+    const changedSections = Object.fromEntries(
+      dirtyNames.map((name) => [name, currentSections[name]])
+    ) as Partial<AccountSections>;
+    const submittedFingerprints = Object.fromEntries(
+      dirtyNames.map((name) => [name, currentFingerprints[name]])
+    );
+
+    accountSyncing.current = true;
+    let accepted = false;
+    try {
+      const result = await flushAccountSections(changedSections);
+      if (!result) return;
+      accepted = true;
+
+      // Record exactly what this request sent. If the user edits the same
+      // section while it is in flight, its newer fingerprint stays dirty and
+      // is sent by the next pass instead of being marked synced accidentally.
+      const nextBaseline = loadAccountSyncFingerprints(userId);
+      for (const name of dirtyNames) {
+        nextBaseline[name] = submittedFingerprints[name];
+      }
+      saveAccountSyncFingerprints(userId, nextBaseline);
+    } finally {
+      accountSyncing.current = false;
+      if (accepted) {
+        const latestBaseline = loadAccountSyncFingerprints(userId);
+        const changedWhileSending = ACCOUNT_SECTION_NAMES.some(
+          (name) => accountFingerprintsRef.current[name] !== latestBaseline[name]
+        );
+        if (changedWhileSending) {
+          window.setTimeout(() => syncAccountNowRef.current(), 0);
+        }
+      }
+    }
+  }, []);
 
   const syncNow = useCallback(async () => {
+    void syncAccountNow();
     const queue = pendingRef.current;
     // Nothing to push, no connection, or no account to push it to — an
     // anonymous queue would 401 on every attempt.
     if (syncing.current || !queue.length || !isOnline() || !hasSession()) return;
 
     syncing.current = true;
+    let changedWhileSending = false;
     try {
       const result = await flushExpenses(queue);
       const settled = [...result.synced, ...result.failed];
-      if (settled.length) dispatch({ type: "MARK_SYNCED", expenseIds: settled });
+      if (settled.length) {
+        const settledIds = new Set(settled);
+        const currentById = new Map(
+          pendingRef.current.map((expense) => [expense.id, expense])
+        );
+        changedWhileSending = queue.some((sent) => {
+          if (!settledIds.has(sent.id)) return false;
+          const current = currentById.get(sent.id);
+          return Boolean(
+            current &&
+              fingerprintExpenseForSync(current) !== fingerprintExpenseForSync(sent)
+          );
+        });
+        dispatch({
+          type: "MARK_SYNCED",
+          expenses: queue.filter((expense) => settledIds.has(expense.id)),
+        });
+      }
       if (!result.offline && settled.length === queue.length) {
         markFullResyncComplete(userIdRef.current);
       }
     } finally {
       syncing.current = false;
+      if (changedWhileSending) window.setTimeout(() => syncNowRef.current(), 0);
     }
-  }, []);
+  }, [syncAccountNow]);
+
+  useEffect(() => {
+    syncAccountNowRef.current = () => void syncAccountNow();
+    syncNowRef.current = () => void syncNow();
+  }, [syncAccountNow, syncNow]);
 
   const pullNow = useCallback(async () => {
     if (pulling.current || !isOnline() || !hasSession()) return;
 
     pulling.current = true;
     try {
-      const expenses = await fetchExpenses();
+      const pullUserId = userIdRef.current;
+      const [expenses, remoteAccount] = await Promise.all([
+        fetchExpenses(),
+        fetchAccountState(),
+      ]);
       if (expenses) dispatch({ type: "MERGE_REMOTE_EXPENSES", expenses });
+
+      // A null result is a network/API failure. An empty section map is a
+      // successful first sync and must unlock the initial local upload.
+      if (remoteAccount && pullUserId && pullUserId === userIdRef.current) {
+        const baseline = loadAccountSyncFingerprints(pullUserId);
+        const currentFingerprints = accountFingerprintsRef.current;
+        const cleanRemoteNames = ACCOUNT_SECTION_NAMES.filter((name) => {
+          const remote = remoteAccount.sections[name];
+          if (!remote) return false;
+
+          const baselineFingerprint = baseline[name];
+          const locallyDirty =
+            baselineFingerprint !== undefined
+              ? currentFingerprints[name] !== baselineFingerprint
+              : currentFingerprints[name] !== DEFAULT_ACCOUNT_FINGERPRINTS[name];
+
+          return !locallyDirty;
+        });
+
+        const remoteSections = Object.fromEntries(
+          cleanRemoteNames.map((name) => [name, remoteAccount.sections[name]!.value])
+        ) as Partial<AccountSections>;
+        const nextBaseline = { ...baseline };
+        for (const name of cleanRemoteNames) {
+          nextBaseline[name] = JSON.stringify(remoteAccount.sections[name]!.value);
+        }
+        saveAccountSyncFingerprints(pullUserId, nextBaseline);
+        accountReadyUser.current = pullUserId;
+
+        if (cleanRemoteNames.length) {
+          dispatch({ type: "MERGE_REMOTE_ACCOUNT_STATE", sections: remoteSections });
+          if (remoteSections.recurring) dispatch({ type: "RUN_DUE_RECURRING" });
+        } else {
+          // No dispatch means no render/effect will follow this successful
+          // empty pull, so start the first upload directly.
+          void syncAccountNow();
+        }
+      }
     } finally {
       pulling.current = false;
     }
-  }, []);
+  }, [syncAccountNow]);
 
   // Flush when the connection returns and when new work is queued while online.
   useEffect(() => {
     if (!hydrated || !state.online || !pending.length) return;
     const timer = setTimeout(syncNow, 800); // debounce a burst of taps
     return () => clearTimeout(timer);
-  }, [hydrated, state.online, pending.length, syncNow]);
+  }, [hydrated, state.online, pending.length, pendingFingerprint, syncNow]);
+
+  // Non-expense state uses the same offline-first debounce, but is compared
+  // section-by-section against its last server-accepted fingerprint.
+  useEffect(() => {
+    const userId = state.profile.userId;
+    if (
+      !hydrated ||
+      !state.profile.signedIn ||
+      !state.online ||
+      !userId ||
+      accountReadyUser.current !== userId
+    ) {
+      return;
+    }
+
+    const baseline = loadAccountSyncFingerprints(userId);
+    const dirty = ACCOUNT_SECTION_NAMES.some(
+      (name) => accountFingerprints[name] !== baseline[name]
+    );
+    if (!dirty) return;
+
+    const timer = window.setTimeout(() => void syncAccountNow(), 800);
+    return () => window.clearTimeout(timer);
+  }, [
+    hydrated,
+    state.profile.signedIn,
+    state.profile.userId,
+    state.online,
+    accountFingerprintKey,
+    accountFingerprints,
+    syncAccountNow,
+  ]);
 
   // Pull on sign-in/startup, when returning to the tab, after reconnecting,
   // and periodically while open. Pending local edits win during the merge, so
@@ -227,7 +424,11 @@ export function TallyProvider({ children }: { children: React.ReactNode }) {
     if (!hydrated || !state.profile.signedIn || !state.online) return;
 
     const refresh = () => {
-      if (document.visibilityState === "visible") void pullNow();
+      if (document.visibilityState !== "visible") return;
+      void (async () => {
+        await syncAccountNow();
+        await pullNow();
+      })();
     };
 
     void pullNow();
@@ -240,7 +441,14 @@ export function TallyProvider({ children }: { children: React.ReactNode }) {
       document.removeEventListener("visibilitychange", refresh);
       window.clearInterval(interval);
     };
-  }, [hydrated, state.profile.signedIn, state.profile.userId, state.online, pullNow]);
+  }, [
+    hydrated,
+    state.profile.signedIn,
+    state.profile.userId,
+    state.online,
+    pullNow,
+    syncAccountNow,
+  ]);
 
   const resetAll = useCallback(() => {
     clearState();

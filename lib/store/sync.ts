@@ -1,5 +1,10 @@
 import api, { ApiError } from "../api";
-import type { LocalExpense } from "./state";
+import type {
+  AccountSectionName,
+  AccountSections,
+  LocalExpense,
+  TallyState,
+} from "./state";
 
 /**
  * Outbound sync.
@@ -23,6 +28,88 @@ export interface SyncResult {
 }
 
 const SYNC_BATCH_SIZE = 500;
+
+export const ACCOUNT_SECTION_NAMES = [
+  "profile",
+  "settings",
+  "categories",
+  "tiles",
+  "budgets",
+  "habits",
+  "goals",
+  "recurring",
+] as const satisfies readonly AccountSectionName[];
+
+export type AccountFingerprints = Partial<Record<AccountSectionName, string>>;
+
+export type RemoteAccountState = {
+  sections: {
+    [Name in AccountSectionName]?: {
+      value: AccountSections[Name];
+      revision: number;
+      updatedAt: string;
+    };
+  };
+};
+
+/** Strip identity, runtime state and expense-derived tile counters. */
+export const toAccountSections = (state: TallyState): AccountSections => ({
+  profile: {
+    displayName: state.profile.displayName,
+    currency: state.profile.currency,
+    appearance: state.profile.appearance,
+    onboardingCompleted: state.profile.onboardingCompleted,
+  },
+  settings: state.settings,
+  categories: state.categories,
+  tiles: state.tiles.map((tile) => ({
+    id: tile.id,
+    name: tile.name,
+    iconKey: tile.iconKey,
+    categorySlug: tile.categorySlug,
+    defaultAmountMinor: tile.defaultAmountMinor,
+    presetAmountsMinor: tile.presetAmountsMinor,
+    entry: tile.entry,
+    sortIndex: tile.sortIndex,
+    isArchived: tile.isArchived,
+    isCustom: tile.isCustom,
+  })),
+  budgets: state.budgets,
+  habits: state.habits,
+  goals: state.goals,
+  recurring: state.recurring,
+});
+
+export const fingerprintAccountSection = <Name extends AccountSectionName>(
+  value: AccountSections[Name]
+): string => JSON.stringify(value);
+
+export const fingerprintAccountSections = (
+  sections: AccountSections
+): Record<AccountSectionName, string> =>
+  Object.fromEntries(
+    ACCOUNT_SECTION_NAMES.map((name) => [name, fingerprintAccountSection(sections[name])])
+  ) as Record<AccountSectionName, string>;
+
+/** Download non-expense account state. An empty section map is a valid new account. */
+export const fetchAccountState = async (): Promise<RemoteAccountState | null> => {
+  try {
+    return await api.get<RemoteAccountState>("/account-state/sync");
+  } catch {
+    return null;
+  }
+};
+
+/** Upload only locally changed sections, keeping unrelated device edits intact. */
+export const flushAccountSections = async (
+  sections: Partial<AccountSections>
+): Promise<RemoteAccountState | null> => {
+  try {
+    return await api.patch<RemoteAccountState>("/account-state/sync", { sections });
+  } catch {
+    return null;
+  }
+};
 
 /** Download the account snapshot for a newly signed-in or returning device. */
 export const fetchExpenses = async (): Promise<LocalExpense[] | null> => {
@@ -49,6 +136,9 @@ const toPayload = (expense: LocalExpense) => ({
   source: expense.source,
   deletedAt: expense.deletedAt,
 });
+
+export const fingerprintExpenseForSync = (expense: LocalExpense): string =>
+  JSON.stringify(toPayload(expense));
 
 const flushBatch = async (batch: LocalExpense[]): Promise<SyncResult> => {
   try {

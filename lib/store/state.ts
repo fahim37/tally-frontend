@@ -151,6 +151,33 @@ export interface TallyState {
   hydrated: boolean;
 }
 
+/**
+ * The account-owned state replicated between devices. Expense rows have their
+ * own idempotent queue; runtime flags, authentication identity, and derived
+ * usage counters deliberately stay out of this smaller snapshot.
+ */
+export interface SyncedProfile {
+  displayName: string;
+  currency: string;
+  appearance: LocalProfile["appearance"];
+  onboardingCompleted: boolean;
+}
+
+export type SyncedTile = Omit<LocalTile, "usageCount" | "lastUsedAt">;
+
+export interface AccountSections {
+  profile: SyncedProfile;
+  settings: LocalSettings;
+  categories: LocalCategory[];
+  tiles: SyncedTile[];
+  budgets: LocalBudget[];
+  habits: LocalHabit[];
+  goals: LocalGoal[];
+  recurring: LocalRecurring[];
+}
+
+export type AccountSectionName = keyof AccountSections;
+
 // ── Starting set ───────────────────────────────────────────────────────────
 // The categories and their keyword tables, plus the tiles onboarding offers.
 // Neither is user data: the keywords classify typed text without an AI call,

@@ -234,10 +234,10 @@ export function Profile() {
       {/* Data */}
       <Card className="mb-3" title="Your data">
         <p className="mb-3.5 text-body leading-[1.5]" style={{ color: "var(--muted)" }}>
-          Everything is stored on this device and works offline.
+          Your account data syncs across devices and stays available offline.
           {pendingCount > 0
-            ? ` ${pendingCount} ${pendingCount === 1 ? "entry is" : "entries are"} waiting to sync.`
-            : " Nothing is waiting to sync."}
+            ? ` ${pendingCount} expense ${pendingCount === 1 ? "entry is" : "entries are"} waiting to sync.`
+            : " Changes sync automatically when you’re online."}
         </p>
 
         <button

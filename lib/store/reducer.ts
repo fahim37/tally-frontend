@@ -2,6 +2,7 @@ import { todayLocalDate, toLocalMonth, fromLocalDate, currentLocalMonth } from "
 import type { AuthUser } from "../auth";
 import {
   createInitialState,
+  type AccountSections,
   type LocalExpense,
   type LocalGoal,
   type LocalRecurring,
@@ -53,8 +54,9 @@ export type TallyAction =
   | { type: "UPDATE_SETTINGS"; patch: Partial<TallyState["settings"]> }
   | { type: "SET_ONLINE"; online: boolean }
   | { type: "QUEUE_ALL_EXPENSES" }
+  | { type: "MERGE_REMOTE_ACCOUNT_STATE"; sections: Partial<AccountSections> }
   | { type: "MERGE_REMOTE_EXPENSES"; expenses: LocalExpense[] }
-  | { type: "MARK_SYNCED"; expenseIds: string[] }
+  | { type: "MARK_SYNCED"; expenses: LocalExpense[] }
   | { type: "SIGN_IN"; user: AuthUser }
   | { type: "SIGN_OUT" }
   | { type: "RESET" };
@@ -66,6 +68,21 @@ const withTotal = (expense: LocalExpense): LocalExpense => ({
   ...expense,
   totalAmountMinor: Math.round(expense.unitAmountMinor * expense.quantity),
 });
+
+/** Whether the server accepted the exact version still present locally. */
+const sameExpenseSyncVersion = (current: LocalExpense, sent: LocalExpense): boolean =>
+  current.id === sent.id &&
+  current.tileId === sent.tileId &&
+  current.categorySlug === sent.categorySlug &&
+  current.name === sent.name &&
+  current.note === sent.note &&
+  current.merchant === sent.merchant &&
+  current.unitAmountMinor === sent.unitAmountMinor &&
+  current.quantity === sent.quantity &&
+  current.occurredAt === sent.occurredAt &&
+  current.localDate === sent.localDate &&
+  current.source === sent.source &&
+  current.deletedAt === sent.deletedAt;
 
 /**
  * Tap-upsert: find today's live row for this tile and increment it, or open a
@@ -599,6 +616,40 @@ export const reducer = (state: TallyState, action: TallyAction): TallyState => {
         expenses: state.expenses.map((expense) => ({ ...expense, pendingSync: true })),
       };
 
+    case "MERGE_REMOTE_ACCOUNT_STATE": {
+      const { sections } = action;
+      const tiles = sections.tiles?.map((remote) => {
+        const local = state.tiles.find((tile) => tile.id === remote.id);
+        return {
+          ...remote,
+          // These are derived from the expense snapshot, not authored account
+          // settings. Preserve them until the expense pull recomputes them.
+          usageCount: local?.usageCount ?? 0,
+          lastUsedAt: local?.lastUsedAt ?? null,
+        };
+      });
+
+      return {
+        ...state,
+        profile: sections.profile
+          ? {
+              ...state.profile,
+              displayName: sections.profile.displayName,
+              currency: sections.profile.currency,
+              appearance: sections.profile.appearance,
+              onboardingCompleted: sections.profile.onboardingCompleted,
+            }
+          : state.profile,
+        settings: sections.settings ?? state.settings,
+        categories: sections.categories ?? state.categories,
+        tiles: tiles ?? state.tiles,
+        budgets: sections.budgets ?? state.budgets,
+        habits: sections.habits ?? state.habits,
+        goals: sections.goals ?? state.goals,
+        recurring: sections.recurring ?? state.recurring,
+      };
+    }
+
     case "MERGE_REMOTE_EXPENSES": {
       const localById = new Map(state.expenses.map((expense) => [expense.id, expense]));
       const remoteIds = new Set(action.expenses.map((expense) => expense.id));
@@ -656,11 +707,13 @@ export const reducer = (state: TallyState, action: TallyAction): TallyState => {
     }
 
     case "MARK_SYNCED": {
-      const ids = new Set(action.expenseIds);
+      const sentById = new Map(action.expenses.map((expense) => [expense.id, expense]));
       return {
         ...state,
         expenses: state.expenses.map((e) =>
-          ids.has(e.id) ? { ...e, pendingSync: false } : e
+          sentById.has(e.id) && sameExpenseSyncVersion(e, sentById.get(e.id)!)
+            ? { ...e, pendingSync: false }
+            : e
         ),
       };
     }

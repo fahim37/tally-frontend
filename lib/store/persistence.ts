@@ -1,4 +1,4 @@
-import type { TallyState } from "./state";
+import type { AccountSectionName, TallyState } from "./state";
 
 /**
  * Offline persistence.
@@ -44,6 +44,42 @@ const storageKey = (userId: string | null) =>
   userId ? `${KEY_PREFIX}.v${SCHEMA_VERSION}.${userId}` : `${KEY_PREFIX}.v${SCHEMA_VERSION}.anon`;
 
 const fullResyncKey = (userId: string) => `${KEY_PREFIX}.full-resync.${userId}`;
+const accountSyncKey = (userId: string) => `${KEY_PREFIX}.account-sync.${userId}`;
+
+export type AccountSyncFingerprints = Partial<Record<AccountSectionName, string>>;
+
+/** Last server-accepted value per section, persisted so offline edits remain
+ * identifiable even when the browser is closed before reconnecting. */
+export const loadAccountSyncFingerprints = (
+  userId: string | null
+): AccountSyncFingerprints => {
+  if (typeof window === "undefined" || !userId) return {};
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(accountSyncKey(userId)) ?? "{}") as {
+      fingerprints?: AccountSyncFingerprints;
+    };
+    return parsed.fingerprints ?? {};
+  } catch {
+    return {};
+  }
+};
+
+export const saveAccountSyncFingerprints = (
+  userId: string | null,
+  fingerprints: AccountSyncFingerprints
+): void => {
+  if (typeof window === "undefined" || !userId) return;
+
+  try {
+    window.localStorage.setItem(
+      accountSyncKey(userId),
+      JSON.stringify({ fingerprints, savedAt: new Date().toISOString() })
+    );
+  } catch {
+    /* the local state remains usable; the next pull safely re-establishes it */
+  }
+};
 
 /**
  * The production frontend previously called an expense endpoint that did not
