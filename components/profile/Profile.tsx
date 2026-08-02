@@ -253,7 +253,9 @@ export function Profile() {
       {confirmingReset ? (
         <Card>
           <p className="mb-3.5 text-label leading-[1.5]" style={{ color: "var(--text)" }}>
-            This clears every expense, tile and budget on this device. It can&apos;t be undone.
+            This clears Tally&apos;s locally stored data from this device. Synced account data
+            stays on the server and can return after you refresh or sign in again. Any unsynced
+            changes will be lost.
           </p>
           <div className="flex gap-2.5">
             <button
@@ -270,7 +272,7 @@ export function Profile() {
               className="flex-1 rounded-card py-3.5 text-label font-semibold"
               style={{ background: "var(--amber)", color: "#0B1220" }}
             >
-              Erase everything
+              Clear this device
             </button>
           </div>
         </Card>
@@ -281,7 +283,7 @@ export function Profile() {
           className="w-full rounded-card border py-3.5 text-label font-medium"
           style={{ borderColor: "var(--line)", color: "var(--muted)" }}
         >
-          Reset all data
+          Clear this device
         </button>
       )}
 
