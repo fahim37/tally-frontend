@@ -7,6 +7,7 @@ import { useTally } from "@/lib/store/TallyProvider";
 import { formatMoney, toMinor } from "@/lib/money";
 import { todayLocalDate } from "@/lib/date";
 import type { PadTile } from "@/lib/store/selectors";
+import { TileArt } from "./TileArt";
 
 interface TileSheetProps {
   tile: PadTile | null;
@@ -49,10 +50,9 @@ export function TileSheet({ tile, onClose }: TileSheetProps) {
     <Sheet open onClose={onClose} label={`Edit ${tile.name}`}>
       <div className="mb-5 flex items-center gap-3">
         <span
-          className="flex size-10 items-center justify-center rounded-card"
-          style={{ background: "var(--sky)", color: "var(--blue)" }}
+          className="flex size-12 shrink-0 items-center justify-center"
         >
-          <Icon name={tile.iconKey} size={21} strokeWidth={1.6} />
+          <TileArt iconKey={tile.iconKey} size={44} />
         </span>
         <div>
           <p className="text-subhead" style={{ color: "var(--text)" }}>

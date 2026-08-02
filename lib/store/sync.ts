@@ -24,6 +24,17 @@ export interface SyncResult {
 
 const SYNC_BATCH_SIZE = 500;
 
+/** Download the account snapshot for a newly signed-in or returning device. */
+export const fetchExpenses = async (): Promise<LocalExpense[] | null> => {
+  try {
+    const result = await api.get<{ expenses: LocalExpense[] }>("/expenses/sync");
+    return result.expenses ?? [];
+  } catch {
+    // Local state remains usable offline; focus/reconnect polling tries again.
+    return null;
+  }
+};
+
 const toPayload = (expense: LocalExpense) => ({
   clientId: expense.id,
   tileId: expense.tileId,

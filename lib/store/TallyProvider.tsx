@@ -19,7 +19,7 @@ import {
   needsFullResync,
   saveState,
 } from "./persistence";
-import { flushExpenses, isOnline } from "./sync";
+import { fetchExpenses, flushExpenses, isOnline } from "./sync";
 import { fetchSession, hasSession, signOut as revokeSession } from "../auth";
 
 interface TallyContextValue {
@@ -61,6 +61,7 @@ export function TallyProvider({ children }: { children: React.ReactNode }) {
   // immediately after.
   const [state, dispatch] = useReducer(reducer, undefined, createInitialState);
   const syncing = useRef(false);
+  const pulling = useRef(false);
   const hydrated = state.hydrated;
 
   // ── Hydrate ──────────────────────────────────────────────────────────────
@@ -200,12 +201,46 @@ export function TallyProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const pullNow = useCallback(async () => {
+    if (pulling.current || !isOnline() || !hasSession()) return;
+
+    pulling.current = true;
+    try {
+      const expenses = await fetchExpenses();
+      if (expenses) dispatch({ type: "MERGE_REMOTE_EXPENSES", expenses });
+    } finally {
+      pulling.current = false;
+    }
+  }, []);
+
   // Flush when the connection returns and when new work is queued while online.
   useEffect(() => {
     if (!hydrated || !state.online || !pending.length) return;
     const timer = setTimeout(syncNow, 800); // debounce a burst of taps
     return () => clearTimeout(timer);
   }, [hydrated, state.online, pending.length, syncNow]);
+
+  // Pull on sign-in/startup, when returning to the tab, after reconnecting,
+  // and periodically while open. Pending local edits win during the merge, so
+  // downloading can safely overlap the debounced outbound queue.
+  useEffect(() => {
+    if (!hydrated || !state.profile.signedIn || !state.online) return;
+
+    const refresh = () => {
+      if (document.visibilityState === "visible") void pullNow();
+    };
+
+    void pullNow();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const interval = window.setInterval(refresh, 30_000);
+
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      window.clearInterval(interval);
+    };
+  }, [hydrated, state.profile.signedIn, state.profile.userId, state.online, pullNow]);
 
   const resetAll = useCallback(() => {
     clearState();

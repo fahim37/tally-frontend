@@ -53,6 +53,7 @@ export type TallyAction =
   | { type: "UPDATE_SETTINGS"; patch: Partial<TallyState["settings"]> }
   | { type: "SET_ONLINE"; online: boolean }
   | { type: "QUEUE_ALL_EXPENSES" }
+  | { type: "MERGE_REMOTE_EXPENSES"; expenses: LocalExpense[] }
   | { type: "MARK_SYNCED"; expenseIds: string[] }
   | { type: "SIGN_IN"; user: AuthUser }
   | { type: "SIGN_OUT" }
@@ -555,6 +556,55 @@ export const reducer = (state: TallyState, action: TallyAction): TallyState => {
         ...state,
         expenses: state.expenses.map((expense) => ({ ...expense, pendingSync: true })),
       };
+
+    case "MERGE_REMOTE_EXPENSES": {
+      const localById = new Map(state.expenses.map((expense) => [expense.id, expense]));
+      const remoteIds = new Set(action.expenses.map((expense) => expense.id));
+      const expenses = action.expenses.map((remote) => {
+        const local = localById.get(remote.id);
+        // An unsent local correction is newer than the server snapshot. It
+        // will win remotely as soon as the outbound queue drains.
+        return local?.pendingSync ? local : { ...remote, pendingSync: false };
+      });
+
+      // A local row absent from the snapshot may be an offline write or one
+      // stranded by the old missing endpoint. Never erase it during a pull.
+      for (const local of state.expenses) {
+        if (!remoteIds.has(local.id)) expenses.push(local);
+      }
+
+      expenses.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+
+      const usageByTile = new Map<string, { count: number; lastUsedAt: string }>();
+      let totalTaps = 0;
+      for (const expense of expenses) {
+        if (expense.deletedAt) continue;
+        totalTaps += expense.quantity;
+        if (!expense.tileId) continue;
+        const usage = usageByTile.get(expense.tileId);
+        usageByTile.set(expense.tileId, {
+          count: (usage?.count ?? 0) + expense.quantity,
+          lastUsedAt:
+            !usage || expense.occurredAt > usage.lastUsedAt
+              ? expense.occurredAt
+              : usage.lastUsedAt,
+        });
+      }
+
+      return {
+        ...state,
+        expenses,
+        tiles: state.tiles.map((tile) => {
+          const usage = usageByTile.get(tile.id);
+          return {
+            ...tile,
+            usageCount: usage?.count ?? 0,
+            lastUsedAt: usage?.lastUsedAt ?? null,
+          };
+        }),
+        profile: { ...state.profile, totalTaps },
+      };
+    }
 
     case "MARK_SYNCED": {
       const ids = new Set(action.expenseIds);
