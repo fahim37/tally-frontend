@@ -7,6 +7,7 @@ import { useTally } from "@/lib/store/TallyProvider";
 import { formatMoney, toMinor } from "@/lib/money";
 import { todayLocalDate } from "@/lib/date";
 import type { PadTile } from "@/lib/store/selectors";
+import { ExpenseEditSheet } from "@/components/history/ExpenseEditSheet";
 import { TileArt } from "./TileArt";
 
 interface TileSheetProps {
@@ -16,7 +17,9 @@ interface TileSheetProps {
 
 /**
  * The long-press sheet: change what a tile costs, or correct how many times
- * it was logged today.
+ * a fixed-price tile was logged today. Variable-price tiles expose each of
+ * today's entries separately because Lunch and Dinner can have different
+ * labels and amounts.
  *
  * Both edits are immediate — there is no save step, so "Done" only dismisses.
  * That matches the tap-to-log model: nothing in this app waits for a commit.
@@ -24,9 +27,41 @@ interface TileSheetProps {
 export function TileSheet({ tile, onClose }: TileSheetProps) {
   const { state, dispatch } = useTally();
   const [customAmount, setCustomAmount] = useState("");
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const currency = state.profile.currency;
 
   if (!tile) return null;
+
+  const today = todayLocalDate();
+  const categoryTiles = state.tiles.filter(
+    (candidate) => !candidate.isArchived && candidate.categorySlug === tile.categorySlug
+  );
+  const ownsLegacyOrphans = categoryTiles.length === 1 && categoryTiles[0].id === tile.id;
+  const todayEntries = state.expenses
+    .filter(
+      (expense) =>
+        !expense.deletedAt &&
+        expense.localDate === today &&
+        (expense.tileId === tile.id ||
+          (!expense.tileId &&
+            expense.source === "tap" &&
+            ownsLegacyOrphans &&
+            expense.categorySlug === tile.categorySlug))
+    )
+    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  const editingExpense = editingExpenseId
+    ? (todayEntries.find((expense) => expense.id === editingExpenseId) ?? null)
+    : null;
+
+  if (editingExpense) {
+    return (
+      <ExpenseEditSheet
+        expense={editingExpense}
+        onClose={() => setEditingExpenseId(null)}
+        allowDelete
+      />
+    );
+  }
 
   const setAmount = (amountMinor: number) => {
     dispatch({ type: "SET_TILE_AMOUNT", tileId: tile.id, amountMinor });
@@ -155,51 +190,86 @@ export function TileSheet({ tile, onClose }: TileSheetProps) {
         )}
       </div>
 
-      <p
-        className="mb-2.5 text-eyebrow uppercase"
-        style={{ color: "var(--muted)" }}
-      >
-        Quantity today
-      </p>
-
-      <div
-        className="mb-5 flex items-center justify-between rounded-card border px-2.5 py-2"
-        style={{ borderColor: "var(--line)" }}
-      >
-        <button
-          type="button"
-          onClick={() => setQuantity(tile.todayCount - 1)}
-          disabled={tile.todayCount === 0}
-          aria-label="One fewer"
-          className="flex size-10 items-center justify-center rounded-card disabled:opacity-35"
-          style={{ background: "var(--bg)" }}
-        >
-          <Icon name="minus" size={18} strokeWidth={2} />
-        </button>
-
-        <span
-          aria-live="polite"
-          className="font-display text-display tabular-nums"
-          style={{ color: "var(--text)" }}
-        >
-          {tile.todayCount}
-        </span>
-
-        <button
-          type="button"
-          onClick={() => setQuantity(tile.todayCount + 1)}
-          aria-label="One more"
-          className="flex size-10 items-center justify-center rounded-card"
-          style={{ background: "var(--bg)" }}
-        >
-          <Icon name="plus" size={18} strokeWidth={2} />
-        </button>
-      </div>
-
-      <p className="mb-4 text-meta leading-[1.45]" style={{ color: "var(--faint)" }}>
-        Changing the amount updates today&apos;s entries for this tile. Earlier days keep
-        what they were logged at.
-      </p>
+      {tile.entry === "prompt" ? (
+        <>
+          <p className="mb-2.5 text-eyebrow uppercase" style={{ color: "var(--muted)" }}>
+            Today&apos;s entries
+          </p>
+          {todayEntries.length > 0 ? (
+            <div data-scroll className="mb-5 flex max-h-48 flex-col gap-2 overflow-y-auto pr-1">
+              {todayEntries.map((expense) => (
+                <button
+                  key={expense.id}
+                  type="button"
+                  onClick={() => setEditingExpenseId(expense.id)}
+                  className="flex items-center gap-3 rounded-card border px-3.5 py-3 text-left"
+                  style={{ borderColor: "var(--line)", background: "var(--bg)" }}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-body font-medium" style={{ color: "var(--text)" }}>
+                      {expense.name}
+                    </span>
+                    <span className="mt-0.5 block text-caption" style={{ color: "var(--muted)" }}>
+                      {expense.quantity > 1 ? `Quantity ${expense.quantity}` : "Tap to edit"}
+                    </span>
+                  </span>
+                  <span className="font-mono text-body font-medium" style={{ color: "var(--text)" }}>
+                    {formatMoney(expense.totalAmountMinor, currency)}
+                  </span>
+                  <span style={{ color: "var(--blue)" }}>
+                    <Icon name="edit" size={17} strokeWidth={1.8} />
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="mb-5 text-body" style={{ color: "var(--faint)" }}>
+              Nothing logged from this tile today.
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="mb-2.5 text-eyebrow uppercase" style={{ color: "var(--muted)" }}>
+            Quantity today
+          </p>
+          <div
+            className="mb-5 flex items-center justify-between rounded-card border px-2.5 py-2"
+            style={{ borderColor: "var(--line)" }}
+          >
+            <button
+              type="button"
+              onClick={() => setQuantity(tile.todayCount - 1)}
+              disabled={tile.todayCount === 0}
+              aria-label="One fewer"
+              className="flex size-10 items-center justify-center rounded-card disabled:opacity-35"
+              style={{ background: "var(--bg)" }}
+            >
+              <Icon name="minus" size={18} strokeWidth={2} />
+            </button>
+            <span
+              aria-live="polite"
+              className="font-display text-display tabular-nums"
+              style={{ color: "var(--text)" }}
+            >
+              {tile.todayCount}
+            </span>
+            <button
+              type="button"
+              onClick={() => setQuantity(tile.todayCount + 1)}
+              aria-label="One more"
+              className="flex size-10 items-center justify-center rounded-card"
+              style={{ background: "var(--bg)" }}
+            >
+              <Icon name="plus" size={18} strokeWidth={2} />
+            </button>
+          </div>
+          <p className="mb-4 text-meta leading-[1.45]" style={{ color: "var(--faint)" }}>
+            Changing the amount updates today&apos;s entries for this tile. Earlier days keep
+            what they were logged at.
+          </p>
+        </>
+      )}
 
       <button
         type="button"

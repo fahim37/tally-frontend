@@ -134,15 +134,32 @@ export interface TodayTally {
 export const todayCounts = (state: TallyState): Map<string, TodayTally> => {
   const today = todayLocalDate();
   const counts = new Map<string, TodayTally>();
+  const tilesByCategory = new Map<string, string[]>();
+
+  for (const tile of state.tiles) {
+    if (tile.isArchived) continue;
+    const ids = tilesByCategory.get(tile.categorySlug) ?? [];
+    ids.push(tile.id);
+    tilesByCategory.set(tile.categorySlug, ids);
+  }
 
   for (const expense of state.expenses) {
-    if (expense.deletedAt || expense.localDate !== today || !expense.tileId) continue;
-    const entry = counts.get(expense.tileId);
+    if (expense.deletedAt || expense.localDate !== today) continue;
+    // Early production syncs lost `tile-food`/`tile-transport` because those
+    // local ids had no matching server Tile document. A tap still carries its
+    // category; when exactly one live tile owns that category, the association
+    // is unambiguous and its tally should not disappear.
+    const candidates = tilesByCategory.get(expense.categorySlug) ?? [];
+    const tileId =
+      expense.tileId ?? (expense.source === "tap" && candidates.length === 1 ? candidates[0] : null);
+    if (!tileId) continue;
+
+    const entry = counts.get(tileId);
     if (entry) {
       entry.count += expense.quantity;
       entry.totalMinor += expense.totalAmountMinor;
     } else {
-      counts.set(expense.tileId, {
+      counts.set(tileId, {
         count: expense.quantity,
         totalMinor: expense.totalAmountMinor,
       });

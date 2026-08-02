@@ -5,12 +5,12 @@ import Link from "next/link";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Icon, SearchIcon } from "@/components/ui/Icon";
 import { TallyMarks } from "@/components/ui/TallyMarks";
-import { Sheet } from "@/components/ui/Sheet";
 import { SwipeRow } from "./SwipeRow";
+import { ExpenseEditSheet } from "./ExpenseEditSheet";
 import { useTally } from "@/lib/store/TallyProvider";
 import { useToast } from "@/components/ui/Toast";
 import { historyDays } from "@/lib/store/selectors";
-import { formatMoney, toMinor } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { toCsv, downloadCsv } from "@/lib/csv";
 import { todayLocalDate } from "@/lib/date";
 import type { LocalExpense } from "@/lib/store/state";
@@ -210,7 +210,7 @@ export function History() {
         </div>
       )}
 
-      <EditSheet expense={editing} onClose={() => setEditing(null)} />
+      <ExpenseEditSheet expense={editing} onClose={() => setEditing(null)} />
     </div>
   );
 }
@@ -268,125 +268,6 @@ function EmptyState({ filtered, onClear }: { filtered: boolean; onClear: () => v
         Log your first expense
       </Link>
     </div>
-  );
-}
-
-function EditSheet({ expense, onClose }: { expense: LocalExpense | null; onClose: () => void }) {
-  const { state, dispatch } = useTally();
-  const [name, setName] = useState("");
-  const [amount, setAmount] = useState("");
-  const [quantity, setQuantity] = useState(1);
-  const [loadedId, setLoadedId] = useState<string | null>(null);
-
-  const currency = state.profile.currency;
-
-  // Load the row's values once per expense, without an effect: comparing the
-  // id to what's loaded is enough, and it avoids a render-then-sync flash.
-  if (expense && expense.id !== loadedId) {
-    setLoadedId(expense.id);
-    setName(expense.name);
-    setAmount(String(expense.unitAmountMinor / 100));
-    setQuantity(expense.quantity);
-  }
-
-  if (!expense) return null;
-
-  const save = () => {
-    const unit = toMinor(amount, currency);
-    dispatch({
-      type: "UPDATE_EXPENSE",
-      expenseId: expense.id,
-      patch: {
-        name: name.trim() || expense.name,
-        unitAmountMinor: unit ?? expense.unitAmountMinor,
-        quantity: Math.max(1, quantity),
-      },
-    });
-    onClose();
-  };
-
-  return (
-    <Sheet open onClose={onClose} label={`Edit ${expense.name}`}>
-      <p className="mb-5 font-display text-title" style={{ color: "var(--text)" }}>
-        Edit expense
-      </p>
-
-      <label
-        className="mb-2 block text-eyebrow uppercase"
-        style={{ color: "var(--muted)" }}
-        htmlFor="edit-name"
-      >
-        What was it?
-      </label>
-      <input
-        id="edit-name"
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        className="mb-4 w-full rounded-card border px-3.5 py-3.5 text-label outline-none"
-        style={{ background: "var(--bg)", borderColor: "var(--line)", color: "var(--text)" }}
-      />
-
-      <label
-        className="mb-2 block text-eyebrow uppercase"
-        style={{ color: "var(--muted)" }}
-        htmlFor="edit-amount"
-      >
-        Amount each
-      </label>
-      <input
-        id="edit-amount"
-        value={amount}
-        onChange={(event) => setAmount(event.target.value)}
-        inputMode="decimal"
-        className="mb-4 w-full rounded-card border px-3.5 py-3.5 font-mono text-label tabular-nums outline-none"
-        style={{ background: "var(--bg)", borderColor: "var(--line)", color: "var(--text)" }}
-      />
-
-      <p
-        className="mb-2 text-eyebrow uppercase"
-        style={{ color: "var(--muted)" }}
-      >
-        Quantity
-      </p>
-      <div
-        className="mb-6 flex items-center justify-between rounded-card border px-2.5 py-2"
-        style={{ borderColor: "var(--line)" }}
-      >
-        <button
-          type="button"
-          onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-          aria-label="One fewer"
-          className="flex size-10 items-center justify-center rounded-card"
-          style={{ background: "var(--bg)" }}
-        >
-          <Icon name="minus" size={18} strokeWidth={2} />
-        </button>
-        <span
-          className="font-display text-display tabular-nums"
-          style={{ color: "var(--text)" }}
-        >
-          {quantity}
-        </span>
-        <button
-          type="button"
-          onClick={() => setQuantity((q) => q + 1)}
-          aria-label="One more"
-          className="flex size-10 items-center justify-center rounded-card"
-          style={{ background: "var(--bg)" }}
-        >
-          <Icon name="plus" size={18} strokeWidth={2} />
-        </button>
-      </div>
-
-      <button
-        type="button"
-        onClick={save}
-        className="w-full rounded-card py-4 text-label font-semibold"
-        style={{ background: "var(--blue)", color: "#FFFFFF" }}
-      >
-        Save changes
-      </button>
-    </Sheet>
   );
 }
 

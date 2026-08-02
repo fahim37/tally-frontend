@@ -265,6 +265,7 @@ export const reducer = (state: TallyState, action: TallyAction): TallyState => {
 
     case "SET_TILE_AMOUNT": {
       const localDate = todayLocalDate();
+      const tile = state.tiles.find((candidate) => candidate.id === action.tileId);
       return {
         ...state,
         tiles: state.tiles.map((t) =>
@@ -273,7 +274,10 @@ export const reducer = (state: TallyState, action: TallyAction): TallyState => {
         // Repricing applies to today's open row (the user is correcting what
         // they just logged), but never to closed days.
         expenses: state.expenses.map((e) =>
-          e.tileId === action.tileId && e.localDate === localDate && !e.deletedAt
+          tile?.entry === "instant" &&
+          e.tileId === action.tileId &&
+          e.localDate === localDate &&
+          !e.deletedAt
             ? withTotal({ ...e, unitAmountMinor: action.amountMinor, pendingSync: true })
             : e
         ),
@@ -564,7 +568,14 @@ export const reducer = (state: TallyState, action: TallyAction): TallyState => {
         const local = localById.get(remote.id);
         // An unsent local correction is newer than the server snapshot. It
         // will win remotely as soon as the outbound queue drains.
-        return local?.pendingSync ? local : { ...remote, pendingSync: false };
+        if (local?.pendingSync) return local;
+        // Older server rows predate `clientTileId`. Preserve the association
+        // this device already knows until the repaired snapshot writes it back.
+        return {
+          ...remote,
+          tileId: remote.tileId ?? local?.tileId ?? null,
+          pendingSync: false,
+        };
       });
 
       // A local row absent from the snapshot may be an offline write or one
