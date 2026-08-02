@@ -340,22 +340,60 @@ export const reducer = (state: TallyState, action: TallyAction): TallyState => {
         ),
       };
 
-    case "DELETE_EXPENSE":
-      // Soft delete, so the row can come back from an undo toast.
-      return {
-        ...state,
-        expenses: state.expenses.map((e) =>
-          e.id === action.expenseId ? { ...e, deletedAt: new Date().toISOString() } : e
-        ),
-      };
+    case "DELETE_EXPENSE": {
+      const expense = state.expenses.find((candidate) => candidate.id === action.expenseId);
+      if (!expense || expense.deletedAt) return state;
 
-    case "RESTORE_EXPENSE":
+      // Keep a syncable tombstone. Without `pendingSync`, the next server pull
+      // still contains the live row and would bring the deleted expense back.
       return {
         ...state,
-        expenses: state.expenses.map((e) =>
-          e.id === action.expenseId ? { ...e, deletedAt: null } : e
+        expenses: state.expenses.map((candidate) =>
+          candidate.id === action.expenseId
+            ? { ...candidate, deletedAt: new Date().toISOString(), pendingSync: true }
+            : candidate
         ),
+        tiles: expense.tileId
+          ? state.tiles.map((tile) =>
+              tile.id === expense.tileId
+                ? {
+                    ...tile,
+                    usageCount: Math.max(0, tile.usageCount - expense.quantity),
+                  }
+                : tile
+            )
+          : state.tiles,
+        profile: {
+          ...state.profile,
+          totalTaps: Math.max(0, state.profile.totalTaps - expense.quantity),
+        },
       };
+    }
+
+    case "RESTORE_EXPENSE": {
+      const expense = state.expenses.find((candidate) => candidate.id === action.expenseId);
+      if (!expense?.deletedAt) return state;
+
+      return {
+        ...state,
+        expenses: state.expenses.map((candidate) =>
+          candidate.id === action.expenseId
+            ? { ...candidate, deletedAt: null, pendingSync: true }
+            : candidate
+        ),
+        tiles: expense.tileId
+          ? state.tiles.map((tile) =>
+              tile.id === expense.tileId
+                ? { ...tile, usageCount: tile.usageCount + expense.quantity }
+                : tile
+            )
+          : state.tiles,
+        profile: {
+          ...state.profile,
+          totalTaps: state.profile.totalTaps + expense.quantity,
+        },
+      };
+    }
 
     case "UNDO_LAST_TAP": {
       const localDate = todayLocalDate();
