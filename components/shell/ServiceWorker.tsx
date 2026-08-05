@@ -14,7 +14,7 @@ export function ServiceWorker() {
     if (!("serviceWorker" in navigator)) return;
 
     const register = () => {
-      navigator.serviceWorker.register("/sw.js").catch(() => {
+      navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" }).catch(() => {
         // Registration fails on insecure origins and in some private modes.
         // The app is fully functional without it — only the offline *shell*
         // is lost, not offline logging.

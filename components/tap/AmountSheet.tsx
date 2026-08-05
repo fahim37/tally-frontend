@@ -16,19 +16,6 @@ interface AmountSheetProps {
 }
 
 /**
- * 10, 20, 30 … 200.
- *
- * A plain ladder rather than anything clever. An earlier version ranked these
- * by what the tile had actually been logged at, which meant the chips moved
- * around between visits — and a row whose contents shift is a row you have to
- * read every time instead of building muscle memory for. Fixed positions make
- * "the third one" mean the same thing tomorrow.
- *
- * In major units; converted per-currency at render.
- */
-const QUICK_AMOUNTS = Array.from({ length: 20 }, (_, i) => (i + 1) * 10);
-
-/**
  * "How much?" for the tiles whose answer changes every time.
  *
  * Two ways in, and they're deliberately not equal. The chips are the fast path
@@ -50,12 +37,13 @@ export function AmountSheet({
   onMakeInstant,
 }: AmountSheetProps) {
   // Digits as typed, in *major* units — "125" means ৳125, "12.50" means ৳12.50.
-  //
-  // Nothing resets this on tile change, because nothing needs to: the parent
-  // mounts this keyed by tile id, so opening a different tile is a different
-  // component instance starting from "". The amount left over from the last
-  // thing logged is never the right starting point for the next one.
-  const [typed, setTyped] = useState("");
+  // The tile's saved amount is the starting value, so an amount set from the
+  // long-press sheet is ready to log instead of being hidden state. The parent
+  // keys this component by tile id, giving every open a fresh starting value.
+  const [typed, setTyped] = useState(() => {
+    if (!tile || tile.amountMinor <= 0) return "";
+    return String(tile.amountMinor / minorFactor(currency));
+  });
 
   /**
    * What it was — "Biryani", "CNG to office". Entirely optional.
@@ -76,6 +64,18 @@ export function AmountSheet({
     const value = Number(typed);
     return Number.isFinite(value) ? Math.round(value * factor) : 0;
   }, [typed, factor]);
+
+  // The long-press sheet owns these values. Keeping this list tied to the tile
+  // means adding or removing an offered amount changes this screen immediately.
+  const quickAmountsMinor = useMemo(
+    () =>
+      tile
+        ? [...new Set(tile.presetAmountsMinor)]
+            .filter((minor) => Number.isFinite(minor) && minor > 0)
+            .sort((a, b) => a - b)
+        : [],
+    [tile]
+  );
 
   if (!tile) return null;
 
@@ -143,25 +143,26 @@ export function AmountSheet({
         </span>
       </div>
 
-      <p className="mb-2 text-eyebrow uppercase" style={{ color: "var(--muted)" }}>
-        Quick amounts
-      </p>
-      <div data-scroll className="mb-4 flex gap-1.5 overflow-x-auto pb-1">
-        {QUICK_AMOUNTS.map((major) => {
-          const minor = major * factor;
-          return (
-            <button
-              key={major}
-              type="button"
-              onClick={() => confirm(minor)}
-              className="shrink-0 rounded-pill px-3.5 py-2.5 font-mono text-body font-medium tabular-nums transition-transform active:scale-95"
-              style={{ background: "var(--sky)", color: "var(--blue)" }}
-            >
-              {formatMoney(minor, currency)}
-            </button>
-          );
-        })}
-      </div>
+      {quickAmountsMinor.length > 0 && (
+        <>
+          <p className="mb-2 text-eyebrow uppercase" style={{ color: "var(--muted)" }}>
+            Quick amounts
+          </p>
+          <div data-scroll className="mb-4 flex gap-1.5 overflow-x-auto pb-1">
+            {quickAmountsMinor.map((minor) => (
+              <button
+                key={minor}
+                type="button"
+                onClick={() => confirm(minor)}
+                className="shrink-0 rounded-pill px-3.5 py-2.5 font-mono text-body font-medium tabular-nums transition-transform active:scale-95"
+                style={{ background: "var(--sky)", color: "var(--blue)" }}
+              >
+                {formatMoney(minor, currency)}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       <div className="grid grid-cols-3 gap-2">
         {["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "back"].map((key) => (

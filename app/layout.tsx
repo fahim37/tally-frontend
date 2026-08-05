@@ -34,6 +34,9 @@ export const metadata: Metadata = {
   description:
     "One tap logs it. A personal expense tracker built around a single gesture.",
   applicationName: "Tally",
+  icons: {
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
   appleWebApp: {
     capable: true,
     title: "Tally",

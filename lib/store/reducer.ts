@@ -330,7 +330,6 @@ export const reducer = (state: TallyState, action: TallyAction): TallyState => {
         tiles: state.tiles.map((t) =>
           t.id === action.tileId ? { ...t, isArchived: true } : t
         ),
-        habits: state.habits.filter((h) => h.tileId !== action.tileId),
       };
 
     case "ADD_EXPENSES": {

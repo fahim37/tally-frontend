@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Sheet } from "@/components/ui/Sheet";
 import { Icon } from "@/components/ui/Icon";
+import { useToast } from "@/components/ui/Toast";
 import { useTally } from "@/lib/store/TallyProvider";
 import { formatMoney, toMinor } from "@/lib/money";
 import { todayLocalDate } from "@/lib/date";
@@ -26,8 +27,10 @@ interface TileSheetProps {
  */
 export function TileSheet({ tile, onClose }: TileSheetProps) {
   const { state, dispatch } = useTally();
+  const { toast } = useToast();
   const [customAmount, setCustomAmount] = useState("");
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const currency = state.profile.currency;
 
   if (!tile) return null;
@@ -63,9 +66,38 @@ export function TileSheet({ tile, onClose }: TileSheetProps) {
     );
   }
 
-  const setAmount = (amountMinor: number) => {
+  const setInstantAmount = (amountMinor: number) => {
     dispatch({ type: "SET_TILE_AMOUNT", tileId: tile.id, amountMinor });
     setCustomAmount("");
+  };
+
+  const addOfferedAmount = (amountMinor: number) => {
+    const presetAmountsMinor = Array.from(
+      new Set([...tile.presetAmountsMinor, amountMinor])
+    ).sort((a, b) => a - b);
+
+    dispatch({
+      type: "UPDATE_TILE",
+      tileId: tile.id,
+      patch: {
+        presetAmountsMinor,
+        // Useful if this tile is later switched back to instant logging.
+        defaultAmountMinor: amountMinor,
+      },
+    });
+    setCustomAmount("");
+  };
+
+  const removeOfferedAmount = (amountMinor: number) => {
+    dispatch({
+      type: "UPDATE_TILE",
+      tileId: tile.id,
+      patch: {
+        presetAmountsMinor: tile.presetAmountsMinor.filter(
+          (preset) => preset !== amountMinor
+        ),
+      },
+    });
   };
 
   const setQuantity = (quantity: number) =>
@@ -78,11 +110,31 @@ export function TileSheet({ tile, onClose }: TileSheetProps) {
 
   const applyCustom = () => {
     const minor = toMinor(customAmount, currency);
-    if (minor && minor > 0) setAmount(minor);
+    if (!minor || minor <= 0) return;
+    if (tile.entry === "prompt") addOfferedAmount(minor);
+    else setInstantAmount(minor);
+  };
+
+  const close = () => {
+    setConfirmingRemove(false);
+    onClose();
+  };
+
+  const removeFromHome = () => {
+    const tileId = tile.id;
+    const tileName = tile.name;
+    setConfirmingRemove(false);
+    dispatch({ type: "ARCHIVE_TILE", tileId });
+    onClose();
+    toast(`${tileName} removed from Home Screen`, {
+      actionLabel: "Undo",
+      onAction: () =>
+        dispatch({ type: "UPDATE_TILE", tileId, patch: { isArchived: false } }),
+    });
   };
 
   return (
-    <Sheet open onClose={onClose} label={`Edit ${tile.name}`}>
+    <Sheet open onClose={close} label={`Edit ${tile.name}`}>
       <div className="mb-5 flex items-center gap-3">
         <span
           className="flex size-12 shrink-0 items-center justify-center"
@@ -139,29 +191,56 @@ export function TileSheet({ tile, onClose }: TileSheetProps) {
       </p>
 
       <div className="mb-3 flex flex-wrap gap-2">
-        {tile.presetAmountsMinor.map((preset) => {
-          const active = preset === tile.amountMinor;
-          return (
-            <button
-              key={preset}
-              type="button"
-              onClick={() => setAmount(preset)}
-              aria-pressed={active}
-              className="min-w-18 flex-1 rounded-card border py-3.5 font-mono text-label font-medium tabular-nums"
-              style={{
-                // On a prompt tile these are a menu, not a current value —
-                // highlighting one as "selected" would misrepresent what the
-                // tile does.
-                background: active && tile.entry === "instant" ? "var(--sky)" : "transparent",
-                borderColor: active && tile.entry === "instant" ? "var(--blue)" : "var(--line)",
-                color: active && tile.entry === "instant" ? "var(--blue)" : "var(--text)",
-              }}
-            >
-              {formatMoney(preset, currency, { withSymbol: false })}
-            </button>
-          );
-        })}
+        {[...new Set(tile.presetAmountsMinor)]
+          .sort((a, b) => a - b)
+          .map((preset) => {
+            const active = preset === tile.amountMinor;
+            return (
+              <button
+                key={preset}
+                type="button"
+                onClick={() =>
+                  tile.entry === "prompt"
+                    ? removeOfferedAmount(preset)
+                    : setInstantAmount(preset)
+                }
+                aria-pressed={tile.entry === "instant" ? active : undefined}
+                aria-label={
+                  tile.entry === "prompt"
+                    ? `Remove ${formatMoney(preset, currency)} from offered amounts`
+                    : `Set amount to ${formatMoney(preset, currency)}`
+                }
+                className="flex min-w-18 flex-1 items-center justify-center gap-1.5 rounded-card border py-3.5 font-mono text-label font-medium tabular-nums"
+                style={{
+                  // Prompt values are removable chips, not a single selected
+                  // amount. Instant tiles still highlight their active price.
+                  background:
+                    active && tile.entry === "instant" ? "var(--sky)" : "transparent",
+                  borderColor:
+                    active && tile.entry === "instant" ? "var(--blue)" : "var(--line)",
+                  color:
+                    active && tile.entry === "instant" ? "var(--blue)" : "var(--text)",
+                }}
+              >
+                {formatMoney(preset, currency, { withSymbol: false })}
+                {tile.entry === "prompt" && (
+                  <Icon
+                    name="plus"
+                    size={14}
+                    strokeWidth={1.8}
+                    className="rotate-45 opacity-50"
+                  />
+                )}
+              </button>
+            );
+          })}
       </div>
+
+      {tile.entry === "prompt" && tile.presetAmountsMinor.length === 0 && (
+        <p className="mb-3 text-meta" style={{ color: "var(--faint)" }}>
+          No quick amounts yet. Add one below, or use the keypad when logging.
+        </p>
+      )}
 
       <div
         className="mb-5 flex items-center gap-2 rounded-card border px-3.5 py-3"
@@ -170,9 +249,12 @@ export function TileSheet({ tile, onClose }: TileSheetProps) {
         <input
           value={customAmount}
           onChange={(event) => setCustomAmount(event.target.value)}
-          onBlur={applyCustom}
-          onKeyDown={(event) => event.key === "Enter" && applyCustom()}
-          placeholder="Something else"
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            applyCustom();
+          }}
+          placeholder={tile.entry === "prompt" ? "Add another amount" : "Something else"}
           inputMode="decimal"
           aria-label="Custom amount"
           className="min-w-0 flex-1 bg-transparent font-mono text-label tabular-nums outline-none"
@@ -185,7 +267,7 @@ export function TileSheet({ tile, onClose }: TileSheetProps) {
             className="text-body font-semibold"
             style={{ color: "var(--blue)" }}
           >
-            Set
+            {tile.entry === "prompt" ? "Add" : "Set"}
           </button>
         )}
       </div>
@@ -273,12 +355,54 @@ export function TileSheet({ tile, onClose }: TileSheetProps) {
 
       <button
         type="button"
-        onClick={onClose}
+        onClick={close}
         className="w-full rounded-card py-4 text-label font-semibold"
         style={{ background: "var(--blue)", color: "#FFFFFF" }}
       >
         Done
       </button>
+
+      {confirmingRemove ? (
+        <div
+          className="mt-3 rounded-card border p-3.5"
+          style={{ background: "var(--bg)", borderColor: "var(--line)" }}
+        >
+          <p className="text-body font-medium" style={{ color: "var(--text)" }}>
+            Remove {tile.name} from the Home Screen?
+          </p>
+          <p className="mt-1 text-caption" style={{ color: "var(--muted)" }}>
+            Past entries stay safely in History.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmingRemove(false)}
+              className="min-h-11 flex-1 rounded-card border px-3 text-body font-medium"
+              style={{ borderColor: "var(--line)", color: "var(--muted)" }}
+            >
+              Keep tile
+            </button>
+            <button
+              type="button"
+              onClick={removeFromHome}
+              className="min-h-11 flex-1 rounded-card px-3 text-body font-semibold"
+              style={{ background: "var(--amber)", color: "#0B1220" }}
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirmingRemove(true)}
+          className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-card text-body font-medium"
+          style={{ color: "var(--amber-text)" }}
+        >
+          <Icon name="trash" size={17} strokeWidth={1.8} />
+          Remove from Home Screen
+        </button>
+      )}
     </Sheet>
   );
 }

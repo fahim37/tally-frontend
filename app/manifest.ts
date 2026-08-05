@@ -11,6 +11,7 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "Tally",
     description:
       "One tap logs it. A personal expense tracker built around a single gesture.",
+    id: "/",
     start_url: "/",
     scope: "/",
     display: "standalone",

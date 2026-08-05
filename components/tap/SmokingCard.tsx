@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { Icon } from "@/components/ui/Icon";
-import { shortDate } from "@/lib/date";
+import { dayLabel, longDate, shortDate } from "@/lib/date";
 import type { SmokingStats } from "@/lib/store/selectors";
 
 /**
@@ -20,9 +21,32 @@ import type { SmokingStats } from "@/lib/store/selectors";
  */
 export function SmokingCard({ stats }: { stats: SmokingStats }) {
   const { todayCount, targetDailyCount: target, streak, changePercent } = stats;
+  const [selectedDate, setSelectedDate] = useState(
+    () => stats.recentDays.at(-1)?.localDate ?? null
+  );
 
   const remaining = target === null ? null : target - todayCount;
   const over = remaining !== null && remaining < 0;
+  const peak = Math.max(1, target ?? 0, ...stats.recentDays.map((day) => day.count));
+  const selectedDay =
+    stats.recentDays.find((day) => day.localDate === selectedDate) ??
+    stats.recentDays.at(-1) ??
+    null;
+
+  const selectedWasTracked = Boolean(
+    selectedDay && (selectedDay.count > 0 || selectedDay.underTarget !== null)
+  );
+  const selectedStatus = (() => {
+    if (!selectedDay || !selectedWasTracked) return "Nothing logged for this day.";
+    if (target === null) return "No daily limit was set.";
+    if (selectedDay.count > target) {
+      const difference = selectedDay.count - target;
+      return `${difference} ${difference === 1 ? "cigarette" : "cigarettes"} over the limit.`;
+    }
+    if (selectedDay.count === target) return "Right on the daily limit.";
+    const difference = target - selectedDay.count;
+    return `${difference} ${difference === 1 ? "cigarette" : "cigarettes"} under the limit.`;
+  })();
 
   return (
     <div
@@ -102,36 +126,79 @@ export function SmokingCard({ stats }: { stats: SmokingStats }) {
         </p>
       )}
 
-      {/* Fourteen days, most recent last. A bar chart would need axes and a
-          legend to say the same thing this says at a glance. */}
-      <div className="mt-4 flex items-end gap-1" aria-hidden>
+      {/* Fourteen days, most recent last. Each day is a real button so the
+          chart works with touch, a mouse, and a keyboard. */}
+      <div
+        className="mt-4 flex h-12 items-end gap-1"
+        role="group"
+        aria-label="Cigarettes logged over the last 14 days"
+      >
         {stats.recentDays.map((day) => {
-          const peak = Math.max(
-            1,
-            target ?? 0,
-            ...stats.recentDays.map((d) => d.count)
-          );
           const height = day.count === 0 ? 3 : Math.max(3, (day.count / peak) * 34);
           const untracked = day.underTarget === null && day.count === 0;
+          const selected = day.localDate === selectedDay?.localDate;
+          const dayStatus = untracked
+            ? "nothing logged"
+            : `${day.count} ${day.count === 1 ? "cigarette" : "cigarettes"}`;
 
           return (
-            <span
+            <button
               key={day.localDate}
-              title={`${shortDate(day.localDate)} · ${day.count}`}
-              className="flex-1 rounded-xs"
-              style={{
-                height,
-                background: untracked
-                  ? "var(--line)"
-                  : day.underTarget === false
-                    ? "var(--amber)"
-                    : "var(--teal)",
-                transition: "height var(--dur-base) var(--ease-out)",
-              }}
-            />
+              type="button"
+              onClick={() => setSelectedDate(day.localDate)}
+              onFocus={() => setSelectedDate(day.localDate)}
+              onMouseEnter={() => setSelectedDate(day.localDate)}
+              aria-pressed={selected}
+              aria-label={`${longDate(day.localDate)}: ${dayStatus}`}
+              className="flex h-12 min-w-0 flex-1 items-end justify-center rounded-xs"
+            >
+              <span
+                className="block w-full max-w-6 rounded-xs"
+                style={{
+                  height,
+                  background: untracked
+                    ? "var(--line)"
+                    : day.underTarget === false
+                      ? "var(--amber)"
+                      : "var(--teal)",
+                  boxShadow: selected
+                    ? "0 0 0 2px var(--surf), 0 0 0 4px var(--blue)"
+                    : "none",
+                  transform: selected ? "translateY(-2px)" : "none",
+                  transition:
+                    "height var(--dur-base) var(--ease-out), transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) ease",
+                }}
+              />
+            </button>
           );
         })}
       </div>
+
+      {selectedDay && (
+        <div
+          className="mt-3 flex items-center gap-3 rounded-card px-3.5 py-2.5"
+          style={{ background: "var(--bg)" }}
+          aria-live="polite"
+        >
+          <div className="min-w-0 flex-1">
+            <p className="text-body font-medium" style={{ color: "var(--text)" }}>
+              {dayLabel(selectedDay.localDate)} · {shortDate(selectedDay.localDate)}
+            </p>
+            <p className="mt-0.5 text-caption" style={{ color: "var(--muted)" }}>
+              {selectedStatus}
+            </p>
+          </div>
+          <p
+            className="shrink-0 font-mono text-subhead tabular-nums"
+            style={{
+              color:
+                selectedDay.underTarget === false ? "var(--amber-text)" : "var(--text)",
+            }}
+          >
+            {selectedWasTracked ? selectedDay.count : "—"}
+          </p>
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
         {streak > 0 && (

@@ -476,7 +476,7 @@ export interface SmokingStats {
   /** Consecutive days up to yesterday at or under target. */
   streak: number;
   bestStreak: number;
-  /** Most recent first — the 14-day strip on the home card. */
+  /** Oldest first, most recent last — the 14-day strip on the home card. */
   recentDays: SmokingDay[];
   totalLogged: number;
   smokeFreeDays: number;

@@ -14,7 +14,7 @@
  *                  not serve stale money figures behind the store's back.
  */
 
-const VERSION = "tally-v1";
+const VERSION = "tally-v2";
 const SHELL_CACHE = `${VERSION}-shell`;
 const ASSET_CACHE = `${VERSION}-assets`;
 const OFFLINE_URL = "/";

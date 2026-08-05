@@ -5,6 +5,7 @@ import { TallyProvider } from "@/lib/store/TallyProvider";
 import { ToastProvider } from "@/components/ui/Toast";
 import { AppShell } from "./AppShell";
 import { ServiceWorker } from "./ServiceWorker";
+import { InstallPrompt } from "./InstallPrompt";
 
 /**
  * Client boundary for the whole app. The root layout stays a server component;
@@ -21,6 +22,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           <AppShell>{children}</AppShell>
         </Suspense>
         <ServiceWorker />
+        <InstallPrompt />
       </ToastProvider>
     </TallyProvider>
   );
