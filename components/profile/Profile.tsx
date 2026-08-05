@@ -23,7 +23,7 @@ export function Profile() {
 
   const leave = async () => {
     setSigningOut(true);
-    // `signOut` revokes the refresh token, wipes the persisted store and
+    // `signOut` revokes the refresh token, wipes the persisted store and 
     // resets the reducer. It resolves even if the network call fails —
     // otherwise a dead connection would trap someone in an account.
     await signOut();
